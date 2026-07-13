@@ -8,14 +8,29 @@ import org.junit.Test
 
 class ArmbianImageValidatorTest {
     @Test
-    fun acceptsOfficialUbootMainNameAndSize() {
+    fun acceptsUbootMainWithExpectedRockchipStructure() {
         val file = temporaryFile("u-boot-main.img", 1024L * 1024L)
+        RandomAccessFile(file, "rw").use { handle ->
+            handle.seek(4096)
+            handle.write("U-Boot 2017 Rockchip RK322x bootcmd fdt rknand".toByteArray())
+            handle.seek(8192)
+            handle.write(ByteArray(256) { it.toByte() })
+        }
         assertTrue(ArmbianImageValidator.inspect(file, ImageRole.UBOOT_MAIN).accepted)
+    }
+
+    @Test
+    fun rejectsRenamedBlankBootstrap() {
+        val file = temporaryFile("u-boot-main.img", 4L * 1024L * 1024L)
+        assertFalse(ArmbianImageValidator.inspect(file, ImageRole.UBOOT_MAIN).accepted)
     }
 
     @Test
     fun rejectsExtractedGenericUbootName() {
         val file = temporaryFile("u-boot-extracted.img", 4L * 1024L * 1024L)
+        RandomAccessFile(file, "rw").use { handle ->
+            handle.write("U-Boot Rockchip RK322x bootcmd fdt".toByteArray())
+        }
         assertFalse(ArmbianImageValidator.inspect(file, ImageRole.UBOOT_MAIN).accepted)
     }
 
