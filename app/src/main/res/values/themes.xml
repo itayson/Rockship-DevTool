@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.RockFlash" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/rock_primary</item>
+        <item name="colorPrimaryVariant">@color/rock_primary</item>
+        <item name="colorSecondary">@color/rock_secondary</item>
+        <item name="android:windowBackground">@color/rock_background</item>
+        <item name="android:navigationBarColor">@color/rock_background</item>
+        <item name="android:statusBarColor">@color/rock_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="materialButtonStyle">@style/Widget.MaterialComponents.Button.OutlinedButton</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
+    </style>
+</resources>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RockFlash DevTool</string>
+    <string name="status_waiting">Aguardando dispositivo Rockchip</string>
+    <string name="status_detected">Dispositivo Rockchip detectado</string>
+    <string name="status_no_device">Nenhum dispositivo VID 2207 encontrado</string>
+    <string name="scan">Procurar dispositivo</string>
+    <string name="request_access">Solicitar acesso USB</string>
+    <string name="open_native">Abrir sessão nativa</string>
+    <string name="list_devices">Listar (LD)</string>
+    <string name="read_chip">Ler chip (RCI)</string>
+    <string name="read_flash_id">Ler Flash ID (RID)</string>
+    <string name="read_flash">Ler Flash Info (RFI)</string>
+    <string name="read_capability">Ler capacidades (RCB)</string>
+    <string name="copy_report">Copiar relatório</string>
+    <string name="clear_log">Limpar log</string>
+</resources>

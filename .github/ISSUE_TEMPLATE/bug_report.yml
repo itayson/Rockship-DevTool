@@ -1,0 +1,25 @@
+name: Bug report
+description: Relatar falha reproduzível
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Versão
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Dispositivo / SoC / VID:PID
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs sem dados sensíveis

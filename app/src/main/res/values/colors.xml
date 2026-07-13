@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="rock_background">#0B1117</color>
+    <color name="rock_surface">#121B24</color>
+    <color name="rock_primary">#4CC9F0</color>
+    <color name="rock_secondary">#80ED99</color>
+    <color name="rock_warning">#FFB86B</color>
+    <color name="rock_error">#FF6B6B</color>
+    <color name="rock_text">#EAF2F8</color>
+    <color name="rock_muted">#9AA8B5</color>
+</resources>

@@ -1,0 +1,25 @@
+name: Feature request
+description: Propor funcionalidade
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema que a função resolve
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: A função grava ou apaga memória?
+      options:
+        - Não
+        - Talvez
+        - Sim
+    validations:
+      required: true
