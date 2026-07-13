@@ -12,13 +12,14 @@ data class SafetySnapshot(
     val powerSaveMode: Boolean,
 ) {
     val writeReady: Boolean
-        get() = batteryPercent >= 60 && charging && !powerSaveMode
+        get() = batteryPercent >= 50 && !powerSaveMode
 
     fun summary(): String = buildString {
         append("Bateria: $batteryPercent%")
         append(if (charging) " • carregando" else " • sem carregador")
         append(if (powerSaveMode) " • economia ativa" else " • economia desativada")
-        append(if (writeReady) " • escrita tecnicamente liberável" else " • escrita bloqueada")
+        append(if (writeReady) " • gravação liberável" else " • gravação bloqueada")
+        if (!charging) append(" • alimentação externa é recomendada")
     }
 }
 
