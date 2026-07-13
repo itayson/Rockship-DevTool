@@ -98,23 +98,46 @@ class ArmbianWizardActivity : AppCompatActivity() {
     private fun detectBox() {
         val device = usbController.findDevices().firstOrNull()
         if (device == null) {
+            rockchipNode = null
+            flashSizeMb = null
+            flashKind = FlashKind.UNKNOWN
             showMessage("Nenhuma TV Box Rockchip VID 2207 foi detectada")
+            updateUi()
             return
         }
-        rockchipNode = device.deviceName
+
+        rockchipNode = null
+        flashSizeMb = null
+        flashKind = FlashKind.UNKNOWN
+        val candidateNode = device.deviceName
         runBusy("Detectando chip e armazenamento…") {
-            val chip = rkBackend.runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.READ_CHIP_INFO, device.deviceName)
-            val flash = rkBackend.runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.READ_FLASH_INFO, device.deviceName)
-            val combined = "${chip.output}\n${flash.output}"
-            flashSizeMb = parseFlashSizeMb(combined)
-            flashKind = when {
-                combined.contains("NAND", ignoreCase = true) || combined.contains("rknand", ignoreCase = true) -> FlashKind.NAND
-                combined.contains("EMMC", ignoreCase = true) -> FlashKind.EMMC
-                else -> flashKind
-            }
+            val chip = rkBackend.runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.READ_CHIP_INFO, candidateNode)
+            val flash = rkBackend.runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.READ_FLASH_INFO, candidateNode)
             appendLog("RCI exit=${chip.exitCode}: ${chip.output}")
             appendLog("RFI exit=${flash.exitCode}: ${flash.output}")
-            if (!chip.success || !flash.success) showMessage("A detecção não foi concluída; consulte o log")
+
+            if (!chip.success || !flash.success) {
+                rockchipNode = null
+                flashSizeMb = null
+                flashKind = FlashKind.UNKNOWN
+                showMessage("A detecção não foi concluída; consulte o log")
+                return@runBusy
+            }
+
+            val combined = "${chip.output}\n${flash.output}"
+            val parsedSizeMb = parseFlashSizeMb(combined)
+            val detectedKind = when {
+                combined.contains("NAND", ignoreCase = true) || combined.contains("rknand", ignoreCase = true) -> FlashKind.NAND
+                combined.contains("EMMC", ignoreCase = true) -> FlashKind.EMMC
+                else -> FlashKind.UNKNOWN
+            }
+
+            rockchipNode = candidateNode
+            flashSizeMb = parsedSizeMb
+            flashKind = detectedKind
+            if (parsedSizeMb == null) {
+                showMessage("Chip detectado, mas não foi possível obter o tamanho da memória")
+            }
         }
     }
 
@@ -133,17 +156,20 @@ class ArmbianWizardActivity : AppCompatActivity() {
         val directory = File(getExternalFilesDir("backups") ?: filesDir, "rockflash").apply { mkdirs() }
         val output = File(directory, "rk322x-${flashKind.name.lowercase()}-${System.currentTimeMillis()}.img")
         val sectors = sizeMb * 2048L
+        val expectedBytes = sectors * 512L
         runBusy("Criando backup completo de $sizeMb MB…") {
             val result = rkBackend.backupFlash(node, output.absolutePath, sectors)
             appendLog("BACKUP exit=${result.exitCode}: ${result.output}")
-            if (result.success && output.length() > 0L) {
+            val actualBytes = if (output.isFile) output.length() else 0L
+            if (result.success && output.isFile && actualBytes == expectedBytes) {
                 backupFile = output
                 val digest = withContext(Dispatchers.IO) { sha256(output) }
                 val parent = output.parentFile ?: directory
                 File(parent, "${output.name}.sha256").writeText("$digest  ${output.name}\n")
                 showMessage("Backup concluído e hash SHA-256 gerado")
             } else {
-                showMessage("Falha no backup; consulte o log")
+                backupFile = null
+                showMessage("Backup incompleto: esperado $expectedBytes bytes, obtido $actualBytes")
             }
         }
     }
@@ -196,7 +222,8 @@ class ArmbianWizardActivity : AppCompatActivity() {
                 runBusy("Gravando ${image.name} em ${target.node}…") {
                     val result = blockBackend.writeImage(image.absolutePath, target, verify = true)
                     appendLog("USB WRITE exit=${result.exitCode}: ${result.output}")
-                    showMessage(if (result.success) "Pendrive gravado" else "Falha ao gravar pendrive")
+                    if (!result.success) selectedBlockDevice = null
+                    showMessage(if (result.success) "Pendrive gravado e verificado" else "Falha ao gravar ou verificar o pendrive")
                 }
             }
             .show()
@@ -348,8 +375,6 @@ class ArmbianWizardActivity : AppCompatActivity() {
     }
 
     private fun updateUi() = with(binding) {
-        val box = usbController.findDevices().firstOrNull()
-        if (box != null && rockchipNode == null) rockchipNode = box.deviceName
         boxStatusText.text = buildString {
             append("Rockchip: ")
             append(if (rockchipNode == null) "não detectado" else rockchipNode)
