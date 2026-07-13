@@ -109,6 +109,9 @@ class MainActivity : AppCompatActivity() {
             selectedDevice?.let { usbController.requestPermission(it.device, ACTION_USB_PERMISSION) }
         }
         openNativeButton.setOnClickListener { openNativeSession() }
+        armbianWizardButton.setOnClickListener {
+            startActivity(Intent(this@MainActivity, ArmbianWizardActivity::class.java))
+        }
         listButton.setOnClickListener { runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.LIST) }
         chipButton.setOnClickListener { runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.READ_CHIP_INFO) }
         flashIdButton.setOnClickListener { runReadOnly(RkDevelopToolBackend.ReadOnlyCommand.READ_FLASH_ID) }
@@ -389,6 +392,7 @@ class MainActivity : AppCompatActivity() {
         binding.scanButton.isEnabled = !busy
         binding.permissionButton.isEnabled = device != null && !permission && !busy
         binding.openNativeButton.isEnabled = permission && !busy
+        binding.armbianWizardButton.isEnabled = !busy
         binding.selectImageButton.isEnabled = !busy
         setCommandButtonsEnabled(enabled)
         setWriteButtonsEnabled(enabled)

@@ -17,6 +17,10 @@
         android:theme="@style/Theme.RockFlash">
 
         <activity
+            android:name=".ArmbianWizardActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

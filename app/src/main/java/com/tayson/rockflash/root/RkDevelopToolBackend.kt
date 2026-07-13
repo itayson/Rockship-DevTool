@@ -19,6 +19,23 @@ class RkDevelopToolBackend(
         timeoutSeconds = 120,
     )
 
+    suspend fun backupFlash(
+        usbDeviceNode: String?,
+        outputPath: String,
+        sectorCount: Long,
+    ): CommandResult {
+        if (sectorCount <= 0L || sectorCount > 0xFFFFFFFFL) {
+            return failure("Quantidade de setores inválida: $sectorCount")
+        }
+        if (outputPath.isBlank()) return failure("Caminho de backup inválido")
+
+        return runCommand(
+            arguments = listOf("rl", "0x0", sectorCount.toString(), outputPath),
+            usbDeviceNode = usbDeviceNode,
+            timeoutSeconds = 43_200,
+        )
+    }
+
     suspend fun runWrite(
         command: WriteCommand,
         usbDeviceNode: String?,

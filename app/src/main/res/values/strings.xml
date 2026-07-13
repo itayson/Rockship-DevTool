@@ -7,6 +7,7 @@
     <string name="scan">Procurar dispositivo</string>
     <string name="request_access">Solicitar acesso USB</string>
     <string name="open_native">Abrir sessão nativa</string>
+    <string name="open_armbian_wizard">Assistente Armbian RK322x</string>
     <string name="list_devices">Listar (LD)</string>
     <string name="read_chip">Ler chip (RCI)</string>
     <string name="read_flash_id">Ler Flash ID (RID)</string>
