@@ -50,7 +50,7 @@ jobs:
           fi
       - name: Upload APK and reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rockflash-devtool-debug
           if-no-files-found: warn
