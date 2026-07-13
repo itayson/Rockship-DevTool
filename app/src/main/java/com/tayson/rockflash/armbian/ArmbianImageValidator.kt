@@ -19,6 +19,7 @@ data class ImageInspection(
 object ArmbianImageValidator {
     private const val ONE_MIB = 1024L * 1024L
     private const val MAX_BOOTSTRAP_SCAN_BYTES = 8 * 1024 * 1024
+    private const val MIN_NON_PADDING_BYTES = 256
 
     /* Digests can be added when an upstream release publishes immutable hashes. */
     private val trustedUbootSha256 = emptySet<String>()
@@ -88,20 +89,25 @@ object ArmbianImageValidator {
         val scanLength = minOf(file.length(), MAX_BOOTSTRAP_SCAN_BYTES.toLong()).toInt()
         if (scanLength <= 0) return false
         val data = ByteArray(scanLength)
-        val count = file.inputStream().buffered().use { it.readNBytes(data, 0, scanLength) }
+        val count = file.inputStream().buffered().use { input ->
+            var total = 0
+            while (total < scanLength) {
+                val read = input.read(data, total, scanLength - total)
+                if (read <= 0) break
+                total += read
+            }
+            total
+        }
         if (count <= 0) return false
 
-        var zeroCount = 0
-        var ffCount = 0
+        var nonPaddingBytes = 0
         val distinct = BooleanArray(256)
         for (index in 0 until count) {
             val value = data[index].toInt() and 0xFF
-            if (value == 0) zeroCount++
-            if (value == 0xFF) ffCount++
+            if (value != 0 && value != 0xFF) nonPaddingBytes++
             distinct[value] = true
         }
-        val degenerate = zeroCount > count * 95 / 100 || ffCount > count * 95 / 100 || distinct.count { it } < 16
-        if (degenerate) return false
+        if (nonPaddingBytes < MIN_NON_PADDING_BYTES || distinct.count { it } < 16) return false
 
         val searchable = String(data, 0, count, StandardCharsets.ISO_8859_1).lowercase()
         val hasUboot = "u-boot" in searchable
