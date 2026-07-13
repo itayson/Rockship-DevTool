@@ -66,6 +66,16 @@ class ArmbianWizardActivity : AppCompatActivity() {
     private fun configureActions() = with(binding) {
         closeButton.setOnClickListener { finish() }
         detectBoxButton.setOnClickListener { detectBox() }
+        forceNandButton.setOnClickListener {
+            flashKind = FlashKind.NAND
+            appendLog("Armazenamento confirmado manualmente como NAND")
+            updateUi()
+        }
+        forceEmmcButton.setOnClickListener {
+            flashKind = FlashKind.EMMC
+            appendLog("Armazenamento confirmado manualmente como eMMC")
+            updateUi()
+        }
         backupButton.setOnClickListener { createFullBackup() }
 
         selectUbootButton.setOnClickListener { selectFile(ImageRole.UBOOT_MAIN) }
@@ -99,14 +109,12 @@ class ArmbianWizardActivity : AppCompatActivity() {
             flashSizeMb = parseFlashSizeMb(combined)
             flashKind = when {
                 combined.contains("NAND", ignoreCase = true) || combined.contains("rknand", ignoreCase = true) -> FlashKind.NAND
-                combined.contains("EMMC", ignoreCase = true) || combined.contains("eMMC", ignoreCase = true) -> FlashKind.EMMC
-                else -> FlashKind.UNKNOWN
+                combined.contains("EMMC", ignoreCase = true) -> FlashKind.EMMC
+                else -> flashKind
             }
             appendLog("RCI exit=${chip.exitCode}: ${chip.output}")
             appendLog("RFI exit=${flash.exitCode}: ${flash.output}")
-            if (!chip.success || !flash.success) {
-                showMessage("A detecção não foi concluída; consulte o log")
-            }
+            if (!chip.success || !flash.success) showMessage("A detecção não foi concluída; consulte o log")
         }
     }
 
@@ -131,7 +139,8 @@ class ArmbianWizardActivity : AppCompatActivity() {
             if (result.success && output.length() > 0L) {
                 backupFile = output
                 val digest = withContext(Dispatchers.IO) { sha256(output) }
-                File(output.parentFile, "${output.name}.sha256").writeText("$digest  ${output.name}\n")
+                val parent = output.parentFile ?: directory
+                File(parent, "${output.name}.sha256").writeText("$digest  ${output.name}\n")
                 showMessage("Backup concluído e hash SHA-256 gerado")
             } else {
                 showMessage("Falha no backup; consulte o log")
@@ -147,10 +156,9 @@ class ArmbianWizardActivity : AppCompatActivity() {
                     showMessage("Nenhum dispositivo /dev/sdX removível foi encontrado")
                     return@onSuccess
                 }
-                val labels = devices.map { it.label }.toTypedArray()
                 MaterialAlertDialogBuilder(this@ArmbianWizardActivity)
                     .setTitle("Selecione o pendrive que será apagado")
-                    .setItems(labels) { _, index ->
+                    .setItems(devices.map { it.label }.toTypedArray()) { _, index ->
                         selectedBlockDevice = devices[index]
                         appendLog("USB selecionado: ${devices[index].label}")
                         updateUi()
@@ -180,10 +188,9 @@ class ArmbianWizardActivity : AppCompatActivity() {
             return
         }
 
-        val message = "Todo o conteúdo de ${target.label} será apagado e substituído por ${image.name}."
         MaterialAlertDialogBuilder(this)
             .setTitle("Gravar $label no pendrive")
-            .setMessage(message)
+            .setMessage("Todo o conteúdo de ${target.label} será apagado e substituído por ${image.name}.")
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("APAGAR E GRAVAR") { _, _ ->
                 runBusy("Gravando ${image.name} em ${target.node}…") {
@@ -222,9 +229,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Instalar bootstrap USB na NAND")
-            .setMessage(
-                "Será gravado u-boot-main.img no LBA 0x4000 (16384). O Android interno poderá deixar de iniciar até a instalação ser concluída pelo Multitool.",
-            )
+            .setMessage("Será gravado u-boot-main.img no LBA 0x4000 (16384). O Android interno poderá deixar de iniciar até a instalação ser concluída pelo Multitool.")
             .setNegativeButton("Cancelar", null)
             .setPositiveButton("INSTALAR") { _, _ -> installBootstrap(node, file) }
             .show()
@@ -360,6 +365,8 @@ class ArmbianWizardActivity : AppCompatActivity() {
 
         val enabled = !busy
         detectBoxButton.isEnabled = enabled
+        forceNandButton.isEnabled = enabled
+        forceEmmcButton.isEnabled = enabled
         backupButton.isEnabled = enabled && rockchipNode != null && flashSizeMb != null
         selectUbootButton.isEnabled = enabled
         selectArmbianButton.isEnabled = enabled
@@ -391,7 +398,9 @@ class ArmbianWizardActivity : AppCompatActivity() {
             Regex("Flash\\s*Size\\s*[:=]\\s*(\\d+)\\s*MB", RegexOption.IGNORE_CASE),
             Regex("Size\\s*[:=]\\s*(\\d+)\\s*MB", RegexOption.IGNORE_CASE),
         )
-        return patterns.firstNotNullOfOrNull { it.find(text)?.groupValues?.getOrNull(1)?.toLongOrNull() }
+        return patterns.firstNotNullOfOrNull { pattern ->
+            pattern.find(text)?.groupValues?.getOrNull(1)?.toLongOrNull()
+        }
     }
 
     private fun sha256(file: File): String {
