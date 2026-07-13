@@ -1,0 +1,156 @@
+name: Publicar histórico de versões
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/publish-version-history.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-rockflash-version-history
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publicar ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: 0.1.0-alpha01
+            tag: v0.1.0-alpha01
+            ref: e00b6bb1fb12f90d481befdb581eb1fe0743e8cb
+            title: RockFlash DevTool 0.1.0-alpha01
+          - version: 0.2.0-alpha01
+            tag: v0.2.0-alpha01
+            ref: 99704c91909fc0ecfa5064166866ec0535f24f18
+            title: RockFlash DevTool 0.2.0-alpha01
+          - version: 0.3.0-alpha01
+            tag: v0.3.0-alpha01
+            ref: 781574185aed30c0b7c2cea4f05914bc0b49d516
+            title: RockFlash DevTool 0.3.0-alpha01
+
+    steps:
+      - name: Checkout da versão
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar SDK, NDK e CMake
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Configurar Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Gerar wrapper
+        run: gradle wrapper --gradle-version 8.9
+
+      - name: Testar e compilar APK
+        run: |
+          ./gradlew :app:testDebugUnitTest --stacktrace
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Preparar APK e notas
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          OUT="RockFlash-DevTool-${{ matrix.version }}.apk"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" > "$OUT.sha256"
+
+          case "${{ matrix.version }}" in
+            0.1.0-alpha01)
+              cat > RELEASE_NOTES.md <<'EOF'
+          Primeira versão funcional do RockFlash DevTool.
+
+          - detecção de dispositivos Rockchip VID 2207;
+          - suporte a Loader/MaskROM via USB OTG;
+          - leitura de chip, Flash ID, informações e capacidades;
+          - backend root com rkdeveloptool;
+          - verificações de bateria e segurança;
+          - relatório técnico e APK Android.
+
+          Versão alpha destinada a testes controlados.
+          EOF
+              ;;
+            0.2.0-alpha01)
+              cat > RELEASE_NOTES.md <<'EOF'
+          Adiciona operações avançadas de ROM e memória flash.
+
+          - gravação de imagem completa e partições;
+          - suporte a .img e .img.xz;
+          - loader temporário e atualização de loader;
+          - gravação de GPT e parameter;
+          - apagamento da flash e reinicialização;
+          - listagem de partições;
+          - suporte inicial a ROM, custom ROM e Armbian.
+
+          Operações de escrita exigem root, alimentação estável e backup verificado.
+          EOF
+              ;;
+            0.3.0-alpha01)
+              cat > RELEASE_NOTES.md <<'EOF'
+          Adiciona o Assistente Armbian RK322x.
+
+          - detecção de NAND/eMMC;
+          - backup completo com validação de tamanho e SHA-256;
+          - validação estrutural do u-boot-main.img;
+          - preparação e verificação de pendrive;
+          - suporte a Multitool e imagens Armbian;
+          - instalação do bootstrap no LBA 0x4000;
+          - proteções contra troca do dispositivo USB antes da gravação.
+
+          A etapa steP-nand permanece executada no Multitool por depender do driver rknand do kernel legacy.
+          EOF
+              ;;
+          esac
+
+      - name: Criar ou atualizar GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ matrix.tag }}"
+          APK="RockFlash-DevTool-${{ matrix.version }}.apk"
+          HASH="$APK.sha256"
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "${{ matrix.title }}" \
+              --notes-file RELEASE_NOTES.md \
+              --prerelease
+            gh release upload "$TAG" "$APK" "$HASH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$TAG" "$APK" "$HASH" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "${{ matrix.ref }}" \
+              --title "${{ matrix.title }}" \
+              --notes-file RELEASE_NOTES.md \
+              --prerelease
+          fi
