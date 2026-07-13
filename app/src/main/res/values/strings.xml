@@ -12,6 +12,16 @@
     <string name="read_flash_id">Ler Flash ID (RID)</string>
     <string name="read_flash">Ler Flash Info (RFI)</string>
     <string name="read_capability">Ler capacidades (RCB)</string>
+    <string name="print_partitions">Partições (PPT)</string>
+    <string name="select_image">Selecionar imagem</string>
+    <string name="flash_raw">Gravar imagem completa</string>
+    <string name="flash_partition">Gravar partição</string>
+    <string name="download_loader">Carregar loader (DB)</string>
+    <string name="upgrade_loader">Atualizar loader (UL)</string>
+    <string name="write_gpt">Gravar GPT</string>
+    <string name="write_parameter">Gravar parameter</string>
+    <string name="erase_flash">Apagar flash inteira</string>
+    <string name="reset_device">Reiniciar dispositivo</string>
     <string name="copy_report">Copiar relatório</string>
     <string name="clear_log">Limpar log</string>
 </resources>
