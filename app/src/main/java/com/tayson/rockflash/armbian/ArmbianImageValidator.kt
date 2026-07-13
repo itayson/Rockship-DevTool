@@ -1,6 +1,8 @@
 package com.tayson.rockflash.armbian
 
 import java.io.File
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 enum class ImageRole {
     ARMBIAN,
@@ -16,6 +18,10 @@ data class ImageInspection(
 
 object ArmbianImageValidator {
     private const val ONE_MIB = 1024L * 1024L
+    private const val MAX_BOOTSTRAP_SCAN_BYTES = 8 * 1024 * 1024
+
+    /* Digests can be added when an upstream release publishes immutable hashes. */
+    private val trustedUbootSha256 = emptySet<String>()
 
     fun inspect(file: File, role: ImageRole): ImageInspection {
         if (!file.isFile || file.length() <= 0L) {
@@ -24,20 +30,7 @@ object ArmbianImageValidator {
 
         val name = file.name.lowercase()
         return when (role) {
-            ImageRole.UBOOT_MAIN -> {
-                val nameMatches = name == "u-boot-main.img" || name.startsWith("u-boot-main")
-                val sizeMatches = file.length() in (128L * 1024L)..(16L * ONE_MIB)
-                ImageInspection(
-                    accepted = nameMatches && sizeMatches,
-                    legacyKernelLikely = false,
-                    message = when {
-                        !nameMatches -> "O bootstrap deve ser o arquivo oficial u-boot-main.img"
-                        !sizeMatches -> "Tamanho incompatível com um bootstrap U-Boot"
-                        else -> "Bootstrap RK322x reconhecido"
-                    },
-                )
-            }
-
+            ImageRole.UBOOT_MAIN -> inspectUbootMain(file, name)
             ImageRole.MULTITOOL -> {
                 val nameMatches = "multitool" in name
                 val sizeMatches = file.length() >= 64L * ONE_MIB
@@ -68,5 +61,65 @@ object ArmbianImageValidator {
                 )
             }
         }
+    }
+
+    private fun inspectUbootMain(file: File, name: String): ImageInspection {
+        val nameMatches = name == "u-boot-main.img" || name.startsWith("u-boot-main-")
+        val sizeMatches = file.length() in (128L * 1024L)..(16L * ONE_MIB) && file.length() % 512L == 0L
+        val digest = sha256(file)
+        val trustedDigest = digest in trustedUbootSha256
+        val structureMatches = hasExpectedUbootStructure(file)
+        val contentMatches = trustedDigest || structureMatches
+
+        return ImageInspection(
+            accepted = nameMatches && sizeMatches && contentMatches,
+            legacyKernelLikely = false,
+            message = when {
+                !nameMatches -> "O bootstrap deve ser o arquivo oficial u-boot-main.img"
+                !sizeMatches -> "Tamanho ou alinhamento incompatível com o bootstrap U-Boot"
+                !contentMatches -> "O conteúdo não apresenta a estrutura esperada de U-Boot Rockchip; SHA-256: $digest"
+                trustedDigest -> "Bootstrap RK322x reconhecido por SHA-256 confiável"
+                else -> "Bootstrap RK322x reconhecido por estrutura binária; SHA-256: $digest"
+            },
+        )
+    }
+
+    private fun hasExpectedUbootStructure(file: File): Boolean {
+        val scanLength = minOf(file.length(), MAX_BOOTSTRAP_SCAN_BYTES.toLong()).toInt()
+        if (scanLength <= 0) return false
+        val data = ByteArray(scanLength)
+        val count = file.inputStream().buffered().use { it.readNBytes(data, 0, scanLength) }
+        if (count <= 0) return false
+
+        var zeroCount = 0
+        var ffCount = 0
+        val distinct = BooleanArray(256)
+        for (index in 0 until count) {
+            val value = data[index].toInt() and 0xFF
+            if (value == 0) zeroCount++
+            if (value == 0xFF) ffCount++
+            distinct[value] = true
+        }
+        val degenerate = zeroCount > count * 95 / 100 || ffCount > count * 95 / 100 || distinct.count { it } < 16
+        if (degenerate) return false
+
+        val searchable = String(data, 0, count, StandardCharsets.ISO_8859_1).lowercase()
+        val hasUboot = "u-boot" in searchable
+        val hasRockchipMarker = listOf("rockchip", "rk322", "rk32", "bootcmd", "fdt", "rknand")
+            .any { it in searchable }
+        return hasUboot && hasRockchipMarker
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(1024 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count <= 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }
