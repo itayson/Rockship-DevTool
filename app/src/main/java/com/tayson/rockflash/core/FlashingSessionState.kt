@@ -118,7 +118,7 @@ object FlashingSessionStore {
     }
 
     fun setPartitions(partitions: List<PartitionEntry>) {
-        mutableState.update { it.copy(partitions = partitions) }
+        mutableState.update { it.copy(partitions = partitions.toList()) }
     }
 
     fun startOperation(totalBytes: Long, detail: String? = null) {
