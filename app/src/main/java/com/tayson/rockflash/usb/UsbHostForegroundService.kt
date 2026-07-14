@@ -25,6 +25,7 @@ import com.tayson.rockflash.flash.RawImageFlashCoordinator
 import com.tayson.rockflash.ui.RockFlashingToolActivity
 import com.tayson.rockflash.util.usbDeviceExtra
 import com.topjohnwu.superuser.Shell
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,7 +45,7 @@ class UsbHostForegroundService : Service() {
     private var rootAvailable = false
     private var rootHintLogged = false
     private var flashJob: Job? = null
-    private var scanGeneration = 0L
+    private val scanGeneration = AtomicLong(0L)
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -117,7 +118,7 @@ class UsbHostForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        scanGeneration++
+        scanGeneration.incrementAndGet()
         runCatching { unregisterReceiver(usbReceiver) }
         serviceScope.cancel()
         FlashingSessionStore.appendLog("Serviço USB Host encerrado")
@@ -152,7 +153,7 @@ class UsbHostForegroundService : Service() {
             return
         }
 
-        scanGeneration++
+        scanGeneration.incrementAndGet()
         FlashingSessionStore.startOperation(imageSizeBytes, "Validando dispositivo, energia e capacidade")
         FlashingSessionStore.appendLog(
             "INÍCIO: gravação integral no LBA 0 (${formatByteCount(imageSizeBytes)})",
@@ -215,7 +216,7 @@ class UsbHostForegroundService : Service() {
 
     private fun scanConnections(preferred: UsbDevice? = null, allowRootPrompt: Boolean = false) {
         if (flashJob?.isActive == true) return
-        val generation = ++scanGeneration
+        val generation = scanGeneration.incrementAndGet()
         serviceScope.launch {
             val rockchipDevices = usbManager.deviceList.values
                 .filter { it.vendorId == RockchipUsbController.ROCKCHIP_VENDOR_ID }
@@ -228,15 +229,15 @@ class UsbHostForegroundService : Service() {
                 }
                 ?: rockchipDevices.firstOrNull()
 
-            if (generation != scanGeneration) return@launch
+            if (!isCurrentScan(generation)) return@launch
             if (device == null) {
-                detectLocalRootMode(allowRootPrompt)
+                detectLocalRootMode(allowRootPrompt, generation)
                 return@launch
             }
 
             val label = device.vidPid()
             if (!usbManager.hasPermission(device)) {
-                if (generation != scanGeneration) return@launch
+                if (!isCurrentScan(generation)) return@launch
                 FlashingSessionStore.setConnection(ConnectionMode.ROCKCHIP_UNKNOWN, label)
                 FlashingSessionStore.appendLog("Rockchip $label aguardando autorização USB")
                 requestUsbPermission(device)
@@ -245,7 +246,7 @@ class UsbHostForegroundService : Service() {
 
             val connection = usbManager.openDevice(device)
             if (connection == null) {
-                if (generation != scanGeneration) return@launch
+                if (!isCurrentScan(generation)) return@launch
                 FlashingSessionStore.setConnection(ConnectionMode.ROCKCHIP_UNKNOWN, label)
                 FlashingSessionStore.appendLog("Falha ao abrir UsbDeviceConnection para $label")
                 return@launch
@@ -257,7 +258,7 @@ class UsbHostForegroundService : Service() {
                 connection.close()
             }
 
-            if (generation != scanGeneration) return@launch
+            if (!isCurrentScan(generation)) return@launch
             startInForeground()
             val connectionMode = when (mode) {
                 RockchipMode.MASKROM -> ConnectionMode.MASKROM
@@ -269,7 +270,7 @@ class UsbHostForegroundService : Service() {
         }
     }
 
-    private fun detectLocalRootMode(allowRootPrompt: Boolean) {
+    private fun detectLocalRootMode(allowRootPrompt: Boolean, generation: Long) {
         Shell.isAppGrantedRoot()?.let { granted ->
             rootProbeCompleted = true
             rootAvailable = granted
@@ -286,6 +287,7 @@ class UsbHostForegroundService : Service() {
             rootProbeCompleted = true
         }
 
+        if (!isCurrentScan(generation)) return
         if (rootAvailable) {
             FlashingSessionStore.setConnection(ConnectionMode.LOCAL_ROOT, "blocos internos")
             FlashingSessionStore.appendLog("Acesso root local disponível")
@@ -297,6 +299,9 @@ class UsbHostForegroundService : Service() {
             }
         }
     }
+
+    private fun isCurrentScan(generation: Long): Boolean =
+        generation == scanGeneration.get() && flashJob?.isActive != true
 
     private fun requestUsbPermission(device: UsbDevice) {
         val permissionIntent = Intent(ACTION_USB_PERMISSION).setPackage(packageName)
