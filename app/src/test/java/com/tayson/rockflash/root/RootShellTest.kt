@@ -10,16 +10,19 @@ import org.junit.Test
 
 class RootShellTest {
     @Test
-    fun missingSuReturnsStructuredResultInsteadOfThrowing() = runBlocking {
-        val shell = RootShell(candidates = listOf("/definitely/not/a/real/su"))
+    fun missingAbsoluteSuIsActuallyAttemptedAndReported() = runBlocking {
+        val missingPath = "/definitely/not/a/real/su"
+        val shell = RootShell(candidates = listOf(missingPath))
 
         val probe = shell.probe(force = true)
         val result = shell.execute("id -u")
 
         assertEquals(RootState.MISSING, probe.state)
+        assertTrue(probe.details.contains(missingPath))
         assertFalse(result.success)
         assertEquals(RootShell.EXIT_ROOT_UNAVAILABLE, result.exitCode)
         assertTrue(result.output.contains("Root não encontrado"))
+        assertTrue(result.output.contains(missingPath))
     }
 
     @Test
@@ -42,6 +45,14 @@ class RootShellTest {
         val probe = RootShell(candidates = listOf(directory.absolutePath)).probe(force = true)
 
         assertEquals(RootState.ERROR, probe.state)
+    }
+
+    @Test
+    fun defaultCandidatesIncludeKernelInterceptedPaths() {
+        assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("/system/bin/su"))
+        assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("/system/bin/kp"))
+        assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("su"))
+        assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("kp"))
     }
 
     @Test
