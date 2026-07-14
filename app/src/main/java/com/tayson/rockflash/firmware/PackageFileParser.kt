@@ -22,8 +22,8 @@ data class FirmwareExtractionResult(
 object PackageFileParser {
     fun parse(text: String): List<FirmwarePackageEntry> {
         val entries = text.lineSequence()
-            .map(String::trim)
-            .filter { it.isNotEmpty() && !it.startsWith('#') }
+            .map { line -> line.trim() }
+            .filter { line -> line.isNotEmpty() && !line.startsWith('#') }
             .mapIndexed { index, line -> parseLine(index + 1, line) }
             .toList()
 
