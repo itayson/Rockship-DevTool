@@ -6,15 +6,24 @@ data class RkBackendStatus(
     val root: RootProbe,
     val binaryPath: String? = null,
     val details: String,
+    val failureExitCode: Int? = null,
 ) {
     val ready: Boolean
-        get() = root.available && !binaryPath.isNullOrBlank()
+        get() = root.available && !binaryPath.isNullOrBlank() && failureExitCode == null
 
     val summary: String
         get() = when {
             !root.available -> root.summary
             binaryPath.isNullOrBlank() -> "Root disponível, mas rkdeveloptool não foi encontrado. Instale-o no Termux ou aguarde o backend USB nativo."
+            failureExitCode != null -> "O rkdeveloptool foi localizado, mas o backend não pôde ser validado."
             else -> "Backend root pronto: $binaryPath"
+        }
+
+    val diagnostic: String
+        get() = buildString {
+            append(summary)
+            if (details.isNotBlank()) append('\n').append(details)
+            failureExitCode?.let { append("\nCódigo de diagnóstico: ").append(it) }
         }
 }
 
@@ -24,7 +33,13 @@ class RkDevelopToolBackend(
 ) {
     suspend fun status(force: Boolean = false): RkBackendStatus {
         val root = rootShell.probe(force)
-        if (!root.available) return RkBackendStatus(root = root, details = root.details)
+        if (!root.available) {
+            return RkBackendStatus(
+                root = root,
+                details = root.details,
+                failureExitCode = RootShell.EXIT_ROOT_UNAVAILABLE,
+            )
+        }
 
         for (candidate in binaryCandidates.distinct()) {
             val check = rootShell.execute(
@@ -39,13 +54,19 @@ class RkDevelopToolBackend(
                 )
             }
             if (check.exitCode in INFRASTRUCTURE_EXIT_CODES) {
-                return RkBackendStatus(root = root, details = check.output)
+                return RkBackendStatus(
+                    root = root,
+                    binaryPath = candidate,
+                    details = check.output,
+                    failureExitCode = check.exitCode,
+                )
             }
         }
 
         return RkBackendStatus(
             root = root,
             details = "Caminhos verificados: ${binaryCandidates.joinToString()}",
+            failureExitCode = EXIT_BACKEND_UNAVAILABLE,
         )
     }
 
@@ -153,12 +174,12 @@ class RkDevelopToolBackend(
     ): CommandResult {
         val backendStatus = status(force = false)
         if (!backendStatus.ready) {
-            val exitCode = if (backendStatus.root.available) {
+            val exitCode = backendStatus.failureExitCode ?: if (backendStatus.root.available) {
                 EXIT_BACKEND_UNAVAILABLE
             } else {
                 RootShell.EXIT_ROOT_UNAVAILABLE
             }
-            return failure(backendStatus.summary, exitCode = exitCode)
+            return failure(backendStatus.diagnostic, exitCode = exitCode)
         }
         val binaryPath = requireNotNull(backendStatus.binaryPath)
 
