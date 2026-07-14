@@ -38,6 +38,7 @@ class UsbHostForegroundService : Service() {
     private lateinit var usbManager: UsbManager
     private var rootProbeCompleted = false
     private var rootAvailable = false
+    private var rootHintLogged = false
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -81,6 +82,7 @@ class UsbHostForegroundService : Service() {
         startInForeground()
         when (intent?.action) {
             ACTION_STOP -> stopSelf()
+            ACTION_PROBE_CONNECTIONS -> scanConnections(intent.usbDeviceExtra(), allowRootPrompt = true)
             else -> scanConnections(intent?.usbDeviceExtra())
         }
         return START_STICKY
@@ -109,7 +111,7 @@ class UsbHostForegroundService : Service() {
         )
     }
 
-    private fun scanConnections(preferred: UsbDevice? = null) {
+    private fun scanConnections(preferred: UsbDevice? = null, allowRootPrompt: Boolean = false) {
         serviceScope.launch {
             val rockchipDevices = usbManager.deviceList.values
                 .filter { it.vendorId == RockchipUsbController.ROCKCHIP_VENDOR_ID }
@@ -120,7 +122,7 @@ class UsbHostForegroundService : Service() {
                 ?: rockchipDevices.firstOrNull()
 
             if (device == null) {
-                detectLocalRootMode()
+                detectLocalRootMode(allowRootPrompt)
                 return@launch
             }
 
@@ -156,8 +158,13 @@ class UsbHostForegroundService : Service() {
         }
     }
 
-    private fun detectLocalRootMode() {
-        if (!rootProbeCompleted) {
+    private fun detectLocalRootMode(allowRootPrompt: Boolean) {
+        Shell.isAppGrantedRoot()?.let { granted ->
+            rootProbeCompleted = true
+            rootAvailable = granted
+        }
+
+        if (!rootProbeCompleted && allowRootPrompt) {
             rootAvailable = runCatching {
                 val result = Shell.cmd("id -u").exec()
                 result.isSuccess && result.out.firstOrNull()?.trim() == "0"
@@ -173,6 +180,10 @@ class UsbHostForegroundService : Service() {
             FlashingSessionStore.appendLog("Acesso root local disponível")
         } else {
             FlashingSessionStore.setConnection(ConnectionMode.NONE)
+            if (!rootProbeCompleted && !rootHintLogged) {
+                FlashingSessionStore.appendLog("Toque em Detectar para verificar o modo Local Root")
+                rootHintLogged = true
+            }
         }
     }
 
@@ -236,6 +247,7 @@ class UsbHostForegroundService : Service() {
     companion object {
         const val ACTION_USB_PERMISSION = "com.tayson.rockflash.USB_PERMISSION"
         const val ACTION_SCAN = "com.tayson.rockflash.action.SCAN_USB"
+        const val ACTION_PROBE_CONNECTIONS = "com.tayson.rockflash.action.PROBE_CONNECTIONS"
         const val ACTION_STOP = "com.tayson.rockflash.action.STOP_USB_SERVICE"
 
         private const val NOTIFICATION_CHANNEL_ID = "rockchip_usb_host"
@@ -243,7 +255,15 @@ class UsbHostForegroundService : Service() {
         private const val USB_PERMISSION_REQUEST_CODE = 2207
 
         fun start(context: Context) {
-            val intent = Intent(context, UsbHostForegroundService::class.java).setAction(ACTION_SCAN)
+            startWithAction(context, ACTION_SCAN)
+        }
+
+        fun probeConnections(context: Context) {
+            startWithAction(context, ACTION_PROBE_CONNECTIONS)
+        }
+
+        private fun startWithAction(context: Context, action: String) {
+            val intent = Intent(context, UsbHostForegroundService::class.java).setAction(action)
             ContextCompat.startForegroundService(context, intent)
         }
     }
