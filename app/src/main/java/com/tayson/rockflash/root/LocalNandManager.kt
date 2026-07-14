@@ -62,12 +62,19 @@ class LocalNandManager(private val backupRoot: File) {
             append(shellQuote(outputFile.absolutePath))
             append(" bs=4M conv=fsync")
         }
-        val result = Shell.cmd(command).exec()
-        check(result.isSuccess) {
-            "Backup root falhou (${result.code}): ${(result.err + result.out).joinToString("\n")}".trim()
+
+        var completed = false
+        try {
+            val result = Shell.cmd(command).exec()
+            check(result.isSuccess) {
+                "Backup root falhou (${result.code}): ${(result.err + result.out).joinToString("\n")}".trim()
+            }
+            check(outputFile.isFile && outputFile.length() > 0L) { "Backup concluído sem produzir dados" }
+            completed = true
+            outputFile
+        } finally {
+            if (!completed) outputFile.delete()
         }
-        check(outputFile.isFile && outputFile.length() > 0L) { "Backup concluído sem produzir dados" }
-        outputFile
     }
 
     private fun isSafeBlockPath(path: String): Boolean =
