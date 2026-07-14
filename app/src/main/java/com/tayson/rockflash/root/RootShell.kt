@@ -3,6 +3,7 @@ package com.tayson.rockflash.root
 import com.tayson.rockflash.model.CommandResult
 import java.io.File
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
@@ -124,7 +125,7 @@ class RootShell(
                     success = false,
                     exitCode = EXIT_TIMEOUT,
                     output = buildString {
-                        append("Tempo limite excedido após ${timeoutSeconds}s; o processo e seus descendentes foram encerrados")
+                        append("Tempo limite excedido após ${timeoutSeconds}s; foi solicitado o encerramento do processo root e de seus descendentes")
                         if (outcome.output.isNotBlank()) append('\n').append(outcome.output)
                     },
                     durationMs = System.currentTimeMillis() - startedAt,
@@ -140,8 +141,10 @@ class RootShell(
         }
 
     private fun runProcess(executable: String, command: String, timeoutSeconds: Long): ProcessOutcome {
+        val pidFile = "$PID_FILE_PREFIX${UUID.randomUUID()}.pid"
+        val wrappedCommand = buildWrappedCommand(command, pidFile)
         val process = try {
-            ProcessBuilder(executable, "-c", command)
+            ProcessBuilder(executable, "-c", wrappedCommand)
                 .redirectErrorStream(true)
                 .start()
         } catch (error: Throwable) {
@@ -168,7 +171,7 @@ class RootShell(
         }
 
         val completed = runCatching { process.waitFor(timeoutSeconds, TimeUnit.SECONDS) }.getOrDefault(false)
-        if (!completed) terminateProcessTree(process)
+        if (!completed) terminateProcessTree(executable, pidFile, process)
         reader.join(READER_JOIN_MS)
 
         return ProcessOutcome(
@@ -178,32 +181,27 @@ class RootShell(
         )
     }
 
-    private fun terminateProcessTree(process: Process) {
-        val descendants = mutableListOf<ProcessHandle>()
-        runCatching {
-            process.toHandle().descendants().forEach { descendants += it }
+    private fun terminateProcessTree(executable: String, pidFile: String, process: Process) {
+        val cleanup = runCatching {
+            ProcessBuilder(executable, "-c", buildTerminationCommand(pidFile))
+                .redirectErrorStream(true)
+                .start()
+        }.getOrNull()
+
+        if (cleanup != null) {
+            val cleanupCompleted = runCatching {
+                cleanup.waitFor(CLEANUP_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            }.getOrDefault(false)
+            if (!cleanupCompleted) cleanup.destroyForcibly()
         }
 
-        descendants.asReversed().forEach { handle ->
-            runCatching { if (handle.isAlive) handle.destroy() }
-        }
         runCatching { process.destroy() }
-
-        val parentStopped = runCatching {
+        val stopped = runCatching {
             process.waitFor(GRACEFUL_KILL_WAIT_MS, TimeUnit.MILLISECONDS)
         }.getOrDefault(false)
-
-        if (!parentStopped || descendants.any { it.isAlive }) {
-            descendants.asReversed().forEach { handle ->
-                runCatching { if (handle.isAlive) handle.destroyForcibly() }
-            }
+        if (!stopped) {
             runCatching { process.destroyForcibly() }
             runCatching { process.waitFor(FORCED_KILL_WAIT_MS, TimeUnit.MILLISECONDS) }
-        }
-
-        val deadline = System.currentTimeMillis() + FORCED_KILL_WAIT_MS
-        while (descendants.any { it.isAlive } && System.currentTimeMillis() < deadline) {
-            Thread.sleep(PROCESS_POLL_MS)
         }
     }
 
@@ -226,10 +224,11 @@ class RootShell(
 
         private const val MAX_CAPTURED_OUTPUT = 2 * 1024 * 1024
         private const val PROBE_TIMEOUT_SECONDS = 8L
+        private const val CLEANUP_TIMEOUT_SECONDS = 5L
         private const val READER_JOIN_MS = 3_000L
         private const val GRACEFUL_KILL_WAIT_MS = 500L
         private const val FORCED_KILL_WAIT_MS = 2_000L
-        private const val PROCESS_POLL_MS = 25L
+        private const val PID_FILE_PREFIX = "/data/local/tmp/rockflash-"
 
         val DEFAULT_SU_CANDIDATES = listOf(
             "/system/bin/su",
@@ -251,5 +250,34 @@ class RootShell(
             }
             return LaunchFailureKind.OTHER
         }
+
+        internal fun buildWrappedCommand(command: String, pidFile: String): String {
+            val quotedPidFile = shellQuote(pidFile)
+            return buildString {
+                append("umask 077; printf '%s\\n' \"${'$'}${'$'}\" > ")
+                append(quotedPidFile)
+                append(" 2>/dev/null || true; ( ")
+                append(command)
+                append(" ); code=${'$'}?; rm -f ")
+                append(quotedPidFile)
+                append("; exit ${'$'}code")
+            }
+        }
+
+        internal fun buildTerminationCommand(pidFile: String): String {
+            val quotedPidFile = shellQuote(pidFile)
+            return buildString {
+                append("pid_file=")
+                append(quotedPidFile)
+                append("; pid=${'$'}(cat \"${'$'}pid_file\" 2>/dev/null || true); ")
+                append("case \"${'$'}pid\" in ''|*[!0-9]*) rm -f \"${'$'}pid_file\"; exit 0;; esac; ")
+                append("collect_tree() { for child in ${'$'}(cat /proc/\"${'$'}1\"/task/\"${'$'}1\"/children 2>/dev/null); do collect_tree \"${'$'}child\"; done; printf '%s ' \"${'$'}1\"; }; ")
+                append("pids=${'$'}(collect_tree \"${'$'}pid\"); ")
+                append("for p in ${'$'}pids; do kill -TERM \"${'$'}p\" 2>/dev/null || true; done; sleep 1; ")
+                append("for p in ${'$'}pids; do kill -KILL \"${'$'}p\" 2>/dev/null || true; done; rm -f \"${'$'}pid_file\"")
+            }
+        }
+
+        private fun shellQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
     }
 }
