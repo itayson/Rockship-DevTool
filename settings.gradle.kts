@@ -11,8 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven(url = "https://jitpack.io")
     }
 }
 
-rootProject.name = "RockshipDevTool"
+rootProject.name = "RockFlashingTool"
 include(":app")
