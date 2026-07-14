@@ -44,6 +44,7 @@ class UsbHostForegroundService : Service() {
     private var rootAvailable = false
     private var rootHintLogged = false
     private var flashJob: Job? = null
+    private var scanGeneration = 0L
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -56,7 +57,8 @@ class UsbHostForegroundService : Service() {
                         "Permissão USB ${if (granted) "concedida" else "negada"}" +
                             (device?.let { " para ${it.vidPid()}" } ?: ""),
                     )
-                    if (granted) startInForeground()
+                    if (!granted) return
+                    startInForeground()
                     scanConnections(device)
                 }
 
@@ -115,6 +117,7 @@ class UsbHostForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        scanGeneration++
         runCatching { unregisterReceiver(usbReceiver) }
         serviceScope.cancel()
         FlashingSessionStore.appendLog("Serviço USB Host encerrado")
@@ -149,6 +152,7 @@ class UsbHostForegroundService : Service() {
             return
         }
 
+        scanGeneration++
         FlashingSessionStore.startOperation(imageSizeBytes, "Validando dispositivo, energia e capacidade")
         FlashingSessionStore.appendLog(
             "INÍCIO: gravação integral no LBA 0 (${formatByteCount(imageSizeBytes)})",
@@ -165,27 +169,27 @@ class UsbHostForegroundService : Service() {
                     val phaseChanged = phase != lastPhase
                     val shouldReport = phaseChanged || completed == total ||
                         completed - lastReportedBytes >= reportThreshold
-                    if (!shouldReport) return@flash
-
-                    lastPhase = phase
-                    lastReportedBytes = completed
-                    val statePhase = when (phase) {
-                        RockUsbTransferPhase.WRITING -> TransferPhase.WRITING
-                        RockUsbTransferPhase.VERIFYING -> TransferPhase.VERIFYING
+                    if (shouldReport) {
+                        lastPhase = phase
+                        lastReportedBytes = completed
+                        val statePhase = when (phase) {
+                            RockUsbTransferPhase.WRITING -> TransferPhase.WRITING
+                            RockUsbTransferPhase.VERIFYING -> TransferPhase.VERIFYING
+                        }
+                        FlashingSessionStore.updateOperation(
+                            phase = statePhase,
+                            completedBytes = completed,
+                            totalBytes = total,
+                            detail = if (phase == RockUsbTransferPhase.WRITING) {
+                                "Gravando blocos RockUSB"
+                            } else {
+                                "Comparando readback setor a setor"
+                            },
+                        )
+                        startInForeground(
+                            "${statePhase.displayName}: ${formatByteCount(completed)} / ${formatByteCount(total)}",
+                        )
                     }
-                    FlashingSessionStore.updateOperation(
-                        phase = statePhase,
-                        completedBytes = completed,
-                        totalBytes = total,
-                        detail = if (phase == RockUsbTransferPhase.WRITING) {
-                            "Gravando blocos RockUSB"
-                        } else {
-                            "Comparando readback setor a setor"
-                        },
-                    )
-                    startInForeground(
-                        "${statePhase.displayName}: ${formatByteCount(completed)} / ${formatByteCount(total)}",
-                    )
                 }
 
                 FlashingSessionStore.finishOperation(
@@ -211,15 +215,20 @@ class UsbHostForegroundService : Service() {
 
     private fun scanConnections(preferred: UsbDevice? = null, allowRootPrompt: Boolean = false) {
         if (flashJob?.isActive == true) return
+        val generation = ++scanGeneration
         serviceScope.launch {
             val rockchipDevices = usbManager.deviceList.values
                 .filter { it.vendorId == RockchipUsbController.ROCKCHIP_VENDOR_ID }
                 .sortedBy { it.deviceId }
 
             val device = preferred
-                ?.takeIf { it.vendorId == RockchipUsbController.ROCKCHIP_VENDOR_ID }
+                ?.takeIf { candidate ->
+                    candidate.vendorId == RockchipUsbController.ROCKCHIP_VENDOR_ID &&
+                        rockchipDevices.any { it.deviceId == candidate.deviceId }
+                }
                 ?: rockchipDevices.firstOrNull()
 
+            if (generation != scanGeneration) return@launch
             if (device == null) {
                 detectLocalRootMode(allowRootPrompt)
                 return@launch
@@ -227,15 +236,16 @@ class UsbHostForegroundService : Service() {
 
             val label = device.vidPid()
             if (!usbManager.hasPermission(device)) {
+                if (generation != scanGeneration) return@launch
                 FlashingSessionStore.setConnection(ConnectionMode.ROCKCHIP_UNKNOWN, label)
                 FlashingSessionStore.appendLog("Rockchip $label aguardando autorização USB")
                 requestUsbPermission(device)
                 return@launch
             }
 
-            startInForeground()
             val connection = usbManager.openDevice(device)
             if (connection == null) {
+                if (generation != scanGeneration) return@launch
                 FlashingSessionStore.setConnection(ConnectionMode.ROCKCHIP_UNKNOWN, label)
                 FlashingSessionStore.appendLog("Falha ao abrir UsbDeviceConnection para $label")
                 return@launch
@@ -247,6 +257,8 @@ class UsbHostForegroundService : Service() {
                 connection.close()
             }
 
+            if (generation != scanGeneration) return@launch
+            startInForeground()
             val connectionMode = when (mode) {
                 RockchipMode.MASKROM -> ConnectionMode.MASKROM
                 RockchipMode.LOADER -> ConnectionMode.LOADER
