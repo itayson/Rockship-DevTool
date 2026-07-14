@@ -19,7 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DarkColorScheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -48,7 +48,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val RockFlashingDarkColors: DarkColorScheme = darkColorScheme()
+private val RockFlashingDarkColors: ColorScheme = darkColorScheme()
 
 @Composable
 fun RockFlashingToolTheme(content: @Composable () -> Unit) {
@@ -190,20 +190,20 @@ private fun PartitionCard(partitions: List<PartitionEntry>, modifier: Modifier =
 
 @Composable
 private fun PartitionRow(name: String, start: String, size: String, header: Boolean = false) {
-    val weight = if (header) FontWeight.SemiBold else FontWeight.Normal
+    val rowWeight = if (header) FontWeight.SemiBold else FontWeight.Normal
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(name, modifier = Modifier.weight(1.3f), fontWeight = weight, maxLines = 1)
+        Text(name, modifier = Modifier.weight(1.3f), fontWeight = rowWeight, maxLines = 1)
         Text(
             start,
             modifier = Modifier.weight(1f),
             fontFamily = FontFamily.Monospace,
-            fontWeight = weight,
+            fontWeight = rowWeight,
             maxLines = 1,
         )
-        Text(size, modifier = Modifier.weight(1f), fontWeight = weight, maxLines = 1)
+        Text(size, modifier = Modifier.weight(1f), fontWeight = rowWeight, maxLines = 1)
     }
 }
 
