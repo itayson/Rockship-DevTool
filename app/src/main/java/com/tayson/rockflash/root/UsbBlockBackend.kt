@@ -81,16 +81,22 @@ class UsbBlockBackend(
 
         val quotedImage = RkDevelopToolBackend.shellQuote(image.absolutePath)
         val quotedNode = RkDevelopToolBackend.shellQuote(target.node)
-        val verifyCommand = if (verify) {
-            "command -v cmp >/dev/null 2>&1 || { echo 'ERRO: cmp indisponível; verificação obrigatória não pode ser executada' >&2; exit 127; }; " +
-                "cmp -n ${image.length()} $quotedImage $quotedNode;"
+        val verifyPreflight = if (verify) {
+            "command -v cmp >/dev/null 2>&1 || { echo 'ERRO: cmp indisponível; a gravação foi cancelada antes de alterar o pendrive' >&2; exit 127; }"
         } else {
-            ""
+            ":"
+        }
+        val verifyCommand = if (verify) {
+            "cmp -n ${image.length()} $quotedImage $quotedNode"
+        } else {
+            ":"
         }
 
         val command = """
             set -e
-            export PATH=/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:${'$'}PATH
+            export PATH=/data/data/com.termux/files/usr/bin:/data/user/0/com.termux/files/usr/bin:/system/bin:/system/xbin:${'$'}PATH
+            command -v dd >/dev/null 2>&1 || { echo 'ERRO: dd indisponível; nenhuma gravação foi iniciada' >&2; exit 127; }
+            $verifyPreflight
             test -b $quotedNode
             test -s $quotedImage
             for p in ${target.node}*; do umount "${'$'}p" 2>/dev/null || true; done
@@ -121,6 +127,7 @@ class UsbBlockBackend(
         val parts = line.split('|', limit = 6)
         if (parts.size < 6) return null
         val sectors = parts[1].toLongOrNull() ?: return null
+        if (sectors <= 0L || sectors > Long.MAX_VALUE / 512L) return null
         return RemovableBlockDevice(
             node = parts[0],
             sizeBytes = sectors * 512L,

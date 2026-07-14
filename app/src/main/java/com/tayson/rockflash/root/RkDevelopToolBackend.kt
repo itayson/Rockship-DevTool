@@ -2,13 +2,75 @@ package com.tayson.rockflash.root
 
 import com.tayson.rockflash.model.CommandResult
 
+data class RkBackendStatus(
+    val root: RootProbe,
+    val binaryPath: String? = null,
+    val details: String,
+    val failureExitCode: Int? = null,
+) {
+    val ready: Boolean
+        get() = root.available && !binaryPath.isNullOrBlank() && failureExitCode == null
+
+    val summary: String
+        get() = when {
+            !root.available -> root.summary
+            binaryPath.isNullOrBlank() -> "Root disponível, mas rkdeveloptool não foi encontrado. Instale-o no Termux ou aguarde o backend USB nativo."
+            failureExitCode != null -> "O rkdeveloptool foi localizado, mas o backend não pôde ser validado."
+            else -> "Backend root pronto: $binaryPath"
+        }
+
+    val diagnostic: String
+        get() = buildString {
+            append(summary)
+            if (details.isNotBlank()) append('\n').append(details)
+            failureExitCode?.let { append("\nCódigo de diagnóstico: ").append(it) }
+        }
+}
+
 class RkDevelopToolBackend(
     private val rootShell: RootShell = RootShell(),
-    private val binaryPath: String = DEFAULT_BINARY,
-    private val libraryPath: String = DEFAULT_LIBRARY_PATH,
+    private val binaryCandidates: List<String> = DEFAULT_BINARY_CANDIDATES,
 ) {
-    suspend fun isAvailable(): Boolean =
-        rootShell.execute("test -x ${shellQuote(binaryPath)}", timeoutSeconds = 5).success
+    suspend fun status(force: Boolean = false): RkBackendStatus {
+        val root = rootShell.probe(force)
+        if (!root.available) {
+            return RkBackendStatus(
+                root = root,
+                details = root.details,
+                failureExitCode = RootShell.EXIT_ROOT_UNAVAILABLE,
+            )
+        }
+
+        for (candidate in binaryCandidates.distinct()) {
+            val check = rootShell.execute(
+                "test -x ${shellQuote(candidate)} && printf '%s\\n' ${shellQuote(candidate)}",
+                timeoutSeconds = 8,
+            )
+            if (check.success) {
+                return RkBackendStatus(
+                    root = root,
+                    binaryPath = candidate,
+                    details = "rkdeveloptool executável",
+                )
+            }
+            if (check.exitCode in INFRASTRUCTURE_EXIT_CODES) {
+                return RkBackendStatus(
+                    root = root,
+                    binaryPath = candidate,
+                    details = check.output,
+                    failureExitCode = check.exitCode,
+                )
+            }
+        }
+
+        return RkBackendStatus(
+            root = root,
+            details = "Caminhos verificados: ${binaryCandidates.joinToString()}",
+            failureExitCode = EXIT_BACKEND_UNAVAILABLE,
+        )
+    }
+
+    suspend fun isAvailable(): Boolean = status().ready
 
     suspend fun runReadOnly(
         command: ReadOnlyCommand,
@@ -58,7 +120,10 @@ class RkDevelopToolBackend(
         if (command.requiresFile) {
             val path = requireNotNull(filePath)
             val fileCheck = rootShell.execute("test -s ${shellQuote(path)}", timeoutSeconds = 10)
-            if (!fileCheck.success) return failure("Arquivo inexistente, vazio ou inacessível: $path")
+            if (!fileCheck.success) {
+                if (fileCheck.exitCode in INFRASTRUCTURE_EXIT_CODES) return fileCheck
+                return failure("Arquivo inexistente, vazio ou inacessível: $path\n${fileCheck.output}")
+            }
         }
 
         return runCommand(
@@ -107,26 +172,24 @@ class RkDevelopToolBackend(
         usbDeviceNode: String?,
         timeoutSeconds: Long,
     ): CommandResult {
-        if (!isAvailable()) {
-            return failure(
-                "rkdeveloptool não encontrado em $binaryPath. Instale o binário pelo Termux/root antes de usar o backend de gravação.",
-                exitCode = 127,
-            )
-        }
-
-        if (!usbDeviceNode.isNullOrBlank()) {
-            val permissionResult = rootShell.execute(
-                "chmod 666 ${shellQuote(usbDeviceNode)}",
-                timeoutSeconds = 5,
-            )
-            if (!permissionResult.success) {
-                return permissionResult.copy(
-                    output = "Falha ao liberar acesso a $usbDeviceNode\n${permissionResult.output}",
-                )
+        val backendStatus = status(force = false)
+        if (!backendStatus.ready) {
+            val exitCode = backendStatus.failureExitCode ?: if (backendStatus.root.available) {
+                EXIT_BACKEND_UNAVAILABLE
+            } else {
+                RootShell.EXIT_ROOT_UNAVAILABLE
             }
+            return failure(backendStatus.diagnostic, exitCode = exitCode)
+        }
+        val binaryPath = requireNotNull(backendStatus.binaryPath)
+
+        if (!usbDeviceNode.isNullOrBlank() && !USB_NODE_PATTERN.matches(usbDeviceNode)) {
+            return failure("Node USB inválido: $usbDeviceNode")
         }
 
+        val libraryPath = libraryPathFor(binaryPath)
         val shellCommand = buildString {
+            append("export PATH=/data/data/com.termux/files/usr/bin:/data/user/0/com.termux/files/usr/bin:/system/bin:/system/xbin:${'$'}PATH; ")
             append("export LD_LIBRARY_PATH=")
             append(shellQuote(libraryPath))
             append("; exec ")
@@ -138,6 +201,9 @@ class RkDevelopToolBackend(
         }
         return rootShell.execute(shellCommand, timeoutSeconds)
     }
+
+    private fun libraryPathFor(binaryPath: String): String =
+        binaryPath.substringBeforeLast("/bin/") + "/lib"
 
     private fun failure(message: String, exitCode: Int = 2): CommandResult = CommandResult(
         success = false,
@@ -171,8 +237,21 @@ class RkDevelopToolBackend(
 
     companion object {
         const val DEFAULT_BINARY = "/data/data/com.termux/files/usr/bin/rkdeveloptool"
-        const val DEFAULT_LIBRARY_PATH = "/data/data/com.termux/files/usr/lib"
+        const val EXIT_BACKEND_UNAVAILABLE = 125
+
+        val DEFAULT_BINARY_CANDIDATES = listOf(
+            DEFAULT_BINARY,
+            "/data/user/0/com.termux/files/usr/bin/rkdeveloptool",
+        )
+
         private val PARTITION_PATTERN = Regex("[A-Za-z0-9_.-]{1,64}")
+        private val USB_NODE_PATTERN = Regex("^/dev/bus/usb/\\d{3}/\\d{3}$")
+        private val INFRASTRUCTURE_EXIT_CODES = setOf(
+            RootShell.EXIT_TIMEOUT,
+            RootShell.EXIT_ROOT_UNAVAILABLE,
+            RootShell.EXIT_LAUNCH_ERROR,
+            EXIT_BACKEND_UNAVAILABLE,
+        )
 
         fun shellQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
     }
