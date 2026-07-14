@@ -31,6 +31,7 @@ class RootShellTest {
 
         assertEquals(RootState.DENIED, probe.state)
         assertFalse(probe.available)
+        assertTrue(probe.details.contains("/bin/sh: retornou código"))
     }
 
     @Test
@@ -53,6 +54,27 @@ class RootShellTest {
         assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("/system/bin/kp"))
         assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("su"))
         assertTrue(RootShell.DEFAULT_SU_CANDIDATES.contains("kp"))
+    }
+
+    @Test
+    fun candidateDiagnosticPreservesContextAndTruncatesOversizedOutput() {
+        val diagnostic = RootShell.formatCandidateFailure(
+            candidate = "/system/bin/su",
+            status = "tempo limite aguardando autorização root",
+            output = "x".repeat(100_000),
+        )
+
+        assertTrue(diagnostic.startsWith("/system/bin/su: tempo limite aguardando autorização root"))
+        assertTrue(diagnostic.length <= 8 * 1024)
+        assertTrue(diagnostic.contains("diagnóstico truncado"))
+    }
+
+    @Test
+    fun aggregateDiagnosticIsBounded() {
+        val diagnostic = RootShell.boundedText("x".repeat(100_000), 64 * 1024)
+
+        assertEquals(64 * 1024, diagnostic.length)
+        assertTrue(diagnostic.contains("diagnóstico truncado"))
     }
 
     @Test
