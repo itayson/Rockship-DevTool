@@ -33,6 +33,7 @@ import com.tayson.rockflash.usb.RockchipUsbDevice
 import com.tayson.rockflash.util.usbDeviceExtra
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.tukaani.xz.XZInputStream
@@ -46,6 +47,8 @@ class MainActivity : AppCompatActivity() {
     private var openConnection: UsbDeviceConnection? = null
     private var safetySnapshot: SafetySnapshot? = null
     private var backendStatus: RkBackendStatus? = null
+    private var backendRefreshJob: Job? = null
+    private var backendRefreshGeneration = 0L
     private var stagedFile: File? = null
     private var busy = false
 
@@ -102,6 +105,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        backendRefreshGeneration++
+        backendRefreshJob?.cancel()
         runCatching { unregisterReceiver(usbReceiver) }
         closeNativeSession()
         super.onDestroy()
@@ -141,17 +146,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshBackendStatus(showFeedback: Boolean) {
-        lifecycleScope.launch {
+        val generation = ++backendRefreshGeneration
+        backendRefreshJob?.cancel()
+        backendRefreshJob = lifecycleScope.launch {
             val status = rootBackend.status(force = showFeedback)
+            if (generation != backendRefreshGeneration) return@launch
+
             val changed = status != backendStatus
             backendStatus = status
-            if (changed || showFeedback) appendLog("AMBIENTE: ${status.summary}")
+            if (changed || showFeedback) appendLog("AMBIENTE: ${status.diagnostic}")
             updateEnvironmentText()
             updateButtons()
             if (showFeedback) {
                 MaterialAlertDialogBuilder(this@MainActivity)
                     .setTitle("Diagnóstico do backend")
-                    .setMessage("${status.summary}\n\n${status.details}")
+                    .setMessage(status.diagnostic)
                     .setPositiveButton("OK", null)
                     .show()
             }
