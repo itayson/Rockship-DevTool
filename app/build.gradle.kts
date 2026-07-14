@@ -11,8 +11,8 @@ android {
         applicationId = "com.tayson.rockflash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.0-alpha02"
+        versionCode = 6
+        versionName = "0.5.0-alpha01"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -82,4 +82,4 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
 }
 
-// A alteração de versionName/versionCode aciona o workflow automático de release.
+// 0.5 inicia o backend autônomo Android USB Host, sem root/Termux.

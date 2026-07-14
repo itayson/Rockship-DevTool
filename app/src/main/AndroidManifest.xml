@@ -17,6 +17,10 @@
         android:theme="@style/Theme.RockFlash">
 
         <activity
+            android:name=".StandaloneArmbianWizardActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".ArmbianWizardActivity"
             android:exported="false" />
 

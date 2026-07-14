@@ -7,6 +7,7 @@ import android.hardware.usb.UsbManager
 
 data class UsbHostDeviceInfo(
     val deviceName: String,
+    val deviceId: Int,
     val vendorId: Int,
     val productId: Int,
     val productName: String?,
@@ -30,19 +31,29 @@ class UsbHostInspector(context: Context) {
 
     fun allDevices(): List<UsbHostDeviceInfo> = usbManager.deviceList.values.map(::toInfo)
 
-    fun massStorageDevices(): List<UsbHostDeviceInfo> = allDevices().filter { it.massStorage }
+    fun massStorageDevices(): List<UsbHostDeviceInfo> = massStorageUsbDevices().map(::toInfo)
 
-    private fun toInfo(device: UsbDevice): UsbHostDeviceInfo {
-        val massStorage = (0 until device.interfaceCount).any { index ->
-            device.getInterface(index).interfaceClass == UsbConstants.USB_CLASS_MASS_STORAGE
+    fun massStorageUsbDevices(): List<UsbDevice> = usbManager.deviceList.values.filter(::isMassStorage)
+
+    fun findDevice(deviceName: String): UsbDevice? = usbManager.deviceList[deviceName]
+
+    fun hasPermission(device: UsbDevice): Boolean = usbManager.hasPermission(device)
+
+    private fun isMassStorage(device: UsbDevice): Boolean =
+        (0 until device.interfaceCount).any { index ->
+            val usbInterface = device.getInterface(index)
+            usbInterface.interfaceClass == UsbConstants.USB_CLASS_MASS_STORAGE &&
+                usbInterface.interfaceSubclass == 0x06 &&
+                usbInterface.interfaceProtocol == 0x50
         }
-        return UsbHostDeviceInfo(
-            deviceName = device.deviceName,
-            vendorId = device.vendorId,
-            productId = device.productId,
-            productName = runCatching { device.productName }.getOrNull(),
-            manufacturerName = runCatching { device.manufacturerName }.getOrNull(),
-            massStorage = massStorage,
-        )
-    }
+
+    private fun toInfo(device: UsbDevice): UsbHostDeviceInfo = UsbHostDeviceInfo(
+        deviceName = device.deviceName,
+        deviceId = device.deviceId,
+        vendorId = device.vendorId,
+        productId = device.productId,
+        productName = runCatching { device.productName }.getOrNull(),
+        manufacturerName = runCatching { device.manufacturerName }.getOrNull(),
+        massStorage = isMassStorage(device),
+    )
 }
