@@ -2,7 +2,7 @@ package com.tayson.rockflash.usb
 
 /**
  * Serialização do USB Bulk-Only Transport usada tanto por dispositivos
- * RockUSB quanto por pendrives SCSI. Não depende das classes Android para
+ * RockUSB quanto por unidades SCSI USB. Não depende das classes Android para
  * permitir testes unitários no JVM.
  */
 object BulkOnlyProtocol {
@@ -76,6 +76,17 @@ object BulkOnlyProtocol {
         target[offset + 2] = (value ushr 8).toByte()
         target[offset + 3] = value.toByte()
     }
+
+    fun putBe64(target: ByteArray, offset: Int, value: ULong) {
+        repeat(8) { index ->
+            val shift = (7 - index) * 8
+            target[offset + index] = (value shr shift).toByte()
+        }
+    }
+
+    fun getBe16(source: ByteArray, offset: Int): Int =
+        ((source[offset].toInt() and 0xFF) shl 8) or
+            (source[offset + 1].toInt() and 0xFF)
 
     fun getBe32(source: ByteArray, offset: Int): Long =
         ((source[offset].toLong() and 0xFF) shl 24) or

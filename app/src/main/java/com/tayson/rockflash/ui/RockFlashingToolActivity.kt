@@ -15,6 +15,7 @@ import com.tayson.rockflash.core.formatByteCount
 import com.tayson.rockflash.firmware.FirmwareInspector
 import com.tayson.rockflash.firmware.ParameterParseException
 import com.tayson.rockflash.firmware.ParameterParser
+import com.tayson.rockflash.media.UniversalMediaWriterActivity
 import com.tayson.rockflash.usb.UsbHostForegroundService
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +54,9 @@ class RockFlashingToolActivity : ComponentActivity() {
                         UsbHostForegroundService.probeConnections(this)
                     },
                     onFlashRawImage = ::startRawImageFlash,
+                    onOpenMediaWriter = {
+                        startActivity(Intent(this, UniversalMediaWriterActivity::class.java))
+                    },
                     onClearLogs = FlashingSessionStore::clearLogs,
                 )
             }

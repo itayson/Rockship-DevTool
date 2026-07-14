@@ -12,8 +12,8 @@ android {
         applicationId = "com.tayson.rockflash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.7.0-alpha01"
+        versionCode = 9
+        versionName = "0.8.0-alpha01"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -107,4 +107,4 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 
-// 0.7 adiciona gravação integral de imagens brutas no LBA 0 com readback.
+// 0.8 inicia o Universal Media Writer com SCSI BOT, LBA de 64 bits e inspeção de imagens.

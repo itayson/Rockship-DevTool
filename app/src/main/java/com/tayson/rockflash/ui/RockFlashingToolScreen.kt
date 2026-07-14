@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,8 +34,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -68,34 +67,36 @@ fun RockFlashingToolRoute(
     onSelectFirmware: () -> Unit,
     onScan: () -> Unit,
     onFlashRawImage: () -> Unit,
+    onOpenMediaWriter: () -> Unit,
     onClearLogs: () -> Unit,
 ) {
     val state by FlashingSessionStore.state.collectAsStateWithLifecycle()
-    var showFlashConfirmation by rememberSaveable { mutableStateOf(false) }
-    var confirmationText by rememberSaveable { mutableStateOf("") }
+    var showConfirmation by rememberSaveable { mutableStateOf(false) }
+    var confirmation by rememberSaveable { mutableStateOf("") }
 
     RockFlashingToolScreen(
         state = state,
         onSelectFirmware = onSelectFirmware,
         onScan = onScan,
         onFlashRawImage = {
-            confirmationText = ""
-            showFlashConfirmation = true
+            confirmation = ""
+            showConfirmation = true
         },
+        onOpenMediaWriter = onOpenMediaWriter,
         onClearLogs = onClearLogs,
     )
 
-    if (showFlashConfirmation) {
+    if (showConfirmation) {
         AlertDialog(
             onDismissRequest = {
-                if (state.operation?.running != true) showFlashConfirmation = false
+                if (state.operation?.running != true) showConfirmation = false
             },
             title = { Text("Confirmar gravação integral") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         "A imagem será gravada desde o LBA 0 e substituirá a tabela de " +
-                            "partições e todos os dados atuais da memória interna.",
+                            "partições e todos os dados da memória interna.",
                     )
                     Text(
                         state.firmwareName.orEmpty(),
@@ -103,8 +104,8 @@ fun RockFlashingToolRoute(
                         style = MaterialTheme.typography.bodySmall,
                     )
                     OutlinedTextField(
-                        value = confirmationText,
-                        onValueChange = { confirmationText = it },
+                        value = confirmation,
+                        onValueChange = { confirmation = it },
                         label = { Text("Digite FLASH") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
@@ -113,10 +114,10 @@ fun RockFlashingToolRoute(
             },
             confirmButton = {
                 TextButton(
-                    enabled = confirmationText == FLASH_CONFIRMATION,
+                    enabled = confirmation == FLASH_CONFIRMATION,
                     onClick = {
-                        showFlashConfirmation = false
-                        confirmationText = ""
+                        showConfirmation = false
+                        confirmation = ""
                         onFlashRawImage()
                     },
                 ) {
@@ -124,7 +125,7 @@ fun RockFlashingToolRoute(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showFlashConfirmation = false }) {
+                TextButton(onClick = { showConfirmation = false }) {
                     Text("Cancelar")
                 }
             },
@@ -134,11 +135,12 @@ fun RockFlashingToolRoute(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RockFlashingToolScreen(
+private fun RockFlashingToolScreen(
     state: FlashingSessionState,
     onSelectFirmware: () -> Unit,
     onScan: () -> Unit,
     onFlashRawImage: () -> Unit,
+    onOpenMediaWriter: () -> Unit,
     onClearLogs: () -> Unit,
 ) {
     Scaffold(
@@ -148,36 +150,33 @@ fun RockFlashingToolScreen(
                     Column {
                         Text("RockFlashingTool", fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = "RockUSB Host e NAND/eMMC local",
+                            "RockUSB Host, NAND/eMMC e mídia USB",
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
                 },
+                actions = {
+                    TextButton(
+                        onClick = onOpenMediaWriter,
+                        enabled = state.operation?.running != true,
+                    ) {
+                        Text("Gravador USB")
+                    }
+                },
             )
         },
-    ) { contentPadding ->
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(contentPadding)
+                .padding(padding)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ConnectionCard(state = state, onScan = onScan)
-            FirmwareCard(
-                state = state,
-                onSelectFirmware = onSelectFirmware,
-                onFlashRawImage = onFlashRawImage,
-            )
-            PartitionCard(
-                state = state,
-                modifier = Modifier.height(165.dp),
-            )
-            TerminalCard(
-                state = state,
-                onClearLogs = onClearLogs,
-                modifier = Modifier.weight(1f),
-            )
+            ConnectionCard(state, onScan)
+            FirmwareCard(state, onSelectFirmware, onFlashRawImage)
+            PartitionCard(state, Modifier.height(165.dp))
+            TerminalCard(state, onClearLogs, Modifier.weight(1f))
         }
     }
 }
@@ -198,7 +197,7 @@ private fun ConnectionCard(state: FlashingSessionState, onScan: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(state.connectionMode.displayName, fontWeight = FontWeight.SemiBold)
                 Text(
-                    text = state.connectedDevice ?: "Conecte por OTG ou execute localmente com root",
+                    state.connectedDevice ?: "Conecte um Rockchip por OTG ou use o modo root local",
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -230,9 +229,9 @@ private fun FirmwareCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Firmware", fontWeight = FontWeight.SemiBold)
+                    Text("Firmware Rockchip", fontWeight = FontWeight.SemiBold)
                     Text(
-                        text = state.firmwareName ?: "Nenhum .img ou parameter.txt selecionado",
+                        state.firmwareName ?: "Nenhuma imagem selecionada",
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -263,20 +262,16 @@ private fun FirmwareCard(
                 ) {
                     Text("Gravar imagem completa no LBA 0")
                 }
-
                 FirmwareKind.ROCKCHIP_CONTAINER -> Text(
-                    "Contêiner Rockchip detectado. A gravação bruta está bloqueada; " +
-                        "use o extrator RKFW/RKAF.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "Contêiner Rockchip detectado; extração RKFW/RKAF necessária.",
                     color = MaterialTheme.colorScheme.tertiary,
+                    style = MaterialTheme.typography.bodySmall,
                 )
-
                 FirmwareKind.UNSUPPORTED -> Text(
                     "Arquivo não suportado para gravação.",
-                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
                 )
-
                 else -> Unit
             }
 
@@ -300,9 +295,7 @@ private fun FirmwareCard(
                         else -> MaterialTheme.colorScheme.onSurface
                     },
                 )
-                operation.detail?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall)
-                }
+                operation.detail?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
             }
         }
     }
@@ -310,21 +303,19 @@ private fun FirmwareCard(
 
 @Composable
 private fun PartitionCard(state: FlashingSessionState, modifier: Modifier = Modifier) {
-    val partitions = state.partitions
     Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
             Text("Tabela de partições", fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            PartitionRow(name = "Nome", start = "Início", size = "Tamanho", header = true)
+            PartitionRow("Nome", "Início", "Tamanho", header = true)
             HorizontalDivider()
-            if (partitions.isEmpty()) {
+            if (state.partitions.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = when (state.firmwareKind) {
+                        when (state.firmwareKind) {
                             FirmwareKind.RAW_DISK_IMAGE ->
                                 "A imagem bruta contém a própria tabela de partições"
                             FirmwareKind.ROCKCHIP_CONTAINER ->
-                                "Extraia o contêiner RKFW/RKAF para listar partições"
+                                "Extraia o contêiner para listar as partições"
                             else -> "Carregue um parameter.txt"
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -332,12 +323,8 @@ private fun PartitionCard(state: FlashingSessionState, modifier: Modifier = Modi
                 }
             } else {
                 LazyColumn {
-                    items(partitions, key = { it.name }) { partition ->
-                        PartitionRow(
-                            name = partition.name,
-                            start = partition.startHex(),
-                            size = partition.sizeLabel(),
-                        )
+                    items(state.partitions, key = { it.name }) { partition ->
+                        PartitionRow(partition.name, partition.startHex(), partition.sizeLabel())
                     }
                 }
             }
@@ -371,11 +358,10 @@ private fun TerminalCard(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    val formatter = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
     LaunchedEffect(state.logs.size) {
         if (state.logs.isNotEmpty()) listState.scrollToItem(state.logs.lastIndex)
     }
-
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0D10)),
@@ -391,13 +377,10 @@ private fun TerminalCard(
                 }
             }
             HorizontalDivider()
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(top = 6.dp),
-                state = listState,
-            ) {
+            LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
                 items(state.logs) { line ->
                     Text(
-                        text = "${timeFormat.format(Date(line.timestampMillis))}  ${line.message}",
+                        "${formatter.format(Date(line.timestampMillis))}  ${line.message}",
                         color = Color(0xFFB7F7C4),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
