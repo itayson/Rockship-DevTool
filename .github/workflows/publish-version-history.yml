@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout da versão
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ matrix.ref }}
           fetch-depth: 0
