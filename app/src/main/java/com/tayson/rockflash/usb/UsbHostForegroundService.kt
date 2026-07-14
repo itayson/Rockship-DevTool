@@ -50,6 +50,7 @@ class UsbHostForegroundService : Service() {
                         "Permissão USB ${if (granted) "concedida" else "negada"}" +
                             (device?.let { " para ${it.vidPid()}" } ?: ""),
                     )
+                    if (granted) startInForeground()
                     scanConnections(device)
                 }
 
@@ -61,6 +62,7 @@ class UsbHostForegroundService : Service() {
 
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     FlashingSessionStore.appendLog("USB desconectado")
+                    startInForeground()
                     scanConnections()
                 }
             }
@@ -130,6 +132,7 @@ class UsbHostForegroundService : Service() {
                 return@launch
             }
 
+            startInForeground()
             val connection = usbManager.openDevice(device)
             if (connection == null) {
                 FlashingSessionStore.setConnection(ConnectionMode.ROCKCHIP_UNKNOWN, label)
@@ -185,6 +188,9 @@ class UsbHostForegroundService : Service() {
     }
 
     private fun startInForeground() {
+        val hasUsbAccess = usbManager.deviceList.values.any { device ->
+            device.vendorId == RockchipUsbController.ROCKCHIP_VENDOR_ID && usbManager.hasPermission(device)
+        }
         val launchIntent = Intent(this, RockFlashingToolActivity::class.java)
         val contentIntent = PendingIntent.getActivity(
             this,
@@ -195,18 +201,21 @@ class UsbHostForegroundService : Service() {
         val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("Monitorando USB Host e modo local")
+            .setContentText(
+                if (hasUsbAccess) "Conexão Rockchip USB ativa" else "Monitorando USB Host e modo local",
+            )
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
+            val foregroundType = if (hasUsbAccess) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
+            startForeground(NOTIFICATION_ID, notification, foregroundType)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
