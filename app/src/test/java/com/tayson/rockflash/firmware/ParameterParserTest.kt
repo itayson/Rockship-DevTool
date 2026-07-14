@@ -36,6 +36,13 @@ class ParameterParserTest {
     }
 
     @Test
+    fun `rejects empty mtdparts device identifier`() {
+        assertThrows(ParameterParseException::class.java) {
+            ParameterParser.parse("CMDLINE:mtdparts=:0x100@0x0(boot)")
+        }
+    }
+
+    @Test
     fun `rejects duplicate names`() {
         assertThrows(ParameterParseException::class.java) {
             ParameterParser.parse(
