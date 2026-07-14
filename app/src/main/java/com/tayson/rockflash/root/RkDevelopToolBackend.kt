@@ -38,6 +38,9 @@ class RkDevelopToolBackend(
                     details = "rkdeveloptool executável",
                 )
             }
+            if (check.exitCode in INFRASTRUCTURE_EXIT_CODES) {
+                return RkBackendStatus(root = root, details = check.output)
+            }
         }
 
         return RkBackendStatus(
@@ -96,7 +99,10 @@ class RkDevelopToolBackend(
         if (command.requiresFile) {
             val path = requireNotNull(filePath)
             val fileCheck = rootShell.execute("test -s ${shellQuote(path)}", timeoutSeconds = 10)
-            if (!fileCheck.success) return failure("Arquivo inexistente, vazio ou inacessível: $path\n${fileCheck.output}")
+            if (!fileCheck.success) {
+                if (fileCheck.exitCode in INFRASTRUCTURE_EXIT_CODES) return fileCheck
+                return failure("Arquivo inexistente, vazio ou inacessível: $path\n${fileCheck.output}")
+            }
         }
 
         return runCommand(
@@ -147,20 +153,17 @@ class RkDevelopToolBackend(
     ): CommandResult {
         val backendStatus = status(force = false)
         if (!backendStatus.ready) {
-            return failure(backendStatus.summary, exitCode = RootShell.EXIT_ROOT_UNAVAILABLE)
+            val exitCode = if (backendStatus.root.available) {
+                EXIT_BACKEND_UNAVAILABLE
+            } else {
+                RootShell.EXIT_ROOT_UNAVAILABLE
+            }
+            return failure(backendStatus.summary, exitCode = exitCode)
         }
         val binaryPath = requireNotNull(backendStatus.binaryPath)
 
-        if (!usbDeviceNode.isNullOrBlank()) {
-            val permissionResult = rootShell.execute(
-                "chmod 660 ${shellQuote(usbDeviceNode)} || chmod 666 ${shellQuote(usbDeviceNode)}",
-                timeoutSeconds = 8,
-            )
-            if (!permissionResult.success) {
-                return permissionResult.copy(
-                    output = "Falha ao liberar acesso ao dispositivo USB $usbDeviceNode\n${permissionResult.output}",
-                )
-            }
+        if (!usbDeviceNode.isNullOrBlank() && !USB_NODE_PATTERN.matches(usbDeviceNode)) {
+            return failure("Node USB inválido: $usbDeviceNode")
         }
 
         val libraryPath = libraryPathFor(binaryPath)
@@ -213,11 +216,21 @@ class RkDevelopToolBackend(
 
     companion object {
         const val DEFAULT_BINARY = "/data/data/com.termux/files/usr/bin/rkdeveloptool"
+        const val EXIT_BACKEND_UNAVAILABLE = 125
+
         val DEFAULT_BINARY_CANDIDATES = listOf(
             DEFAULT_BINARY,
             "/data/user/0/com.termux/files/usr/bin/rkdeveloptool",
         )
+
         private val PARTITION_PATTERN = Regex("[A-Za-z0-9_.-]{1,64}")
+        private val USB_NODE_PATTERN = Regex("^/dev/bus/usb/\\d{3}/\\d{3}$")
+        private val INFRASTRUCTURE_EXIT_CODES = setOf(
+            RootShell.EXIT_TIMEOUT,
+            RootShell.EXIT_ROOT_UNAVAILABLE,
+            RootShell.EXIT_LAUNCH_ERROR,
+            EXIT_BACKEND_UNAVAILABLE,
+        )
 
         fun shellQuote(value: String): String = "'${value.replace("'", "'\\''")}'"
     }
