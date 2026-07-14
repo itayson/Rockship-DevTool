@@ -17,7 +17,7 @@ data class LocalBlockPartition(
  * uma SafetyGate dedicada para impedir que uma URI, nome ou caminho controlado
  * externamente alcance um comando root destrutivo sem validação explícita.
  */
-class LocalNandManager {
+class LocalNandManager(private val backupRoot: File) {
     suspend fun isRootAvailable(): Boolean = withContext(Dispatchers.IO) {
         val result = Shell.cmd("id -u").exec()
         result.isSuccess && result.out.firstOrNull()?.trim() == "0"
@@ -35,8 +35,8 @@ class LocalNandManager {
 
         result.out
             .asSequence()
-            .map(String::trim)
-            .filter(String::isNotEmpty)
+            .map { line -> line.trim() }
+            .filter { line -> line.isNotEmpty() }
             .filter(::isSafeBlockPath)
             .distinct()
             .sorted()
@@ -44,10 +44,16 @@ class LocalNandManager {
             .toList()
     }
 
-    suspend fun backupPartition(blockDevice: String, outputFile: File) = withContext(Dispatchers.IO) {
+    suspend fun backupPartition(blockDevice: String, outputName: String): File = withContext(Dispatchers.IO) {
         require(isSafeBlockPath(blockDevice)) { "Caminho de bloco não permitido: $blockDevice" }
-        require(outputFile.isAbsolute) { "O destino do backup deve ser absoluto" }
-        outputFile.parentFile?.mkdirs()
+        require(SAFE_OUTPUT_NAME.matches(outputName)) { "Nome de backup inválido: $outputName" }
+
+        val root = backupRoot.canonicalFile
+        check(root.exists() || root.mkdirs()) { "Não foi possível criar a pasta de backup" }
+        check(root.isDirectory) { "Destino de backup não é diretório" }
+
+        val outputFile = File(root, outputName).canonicalFile
+        require(outputFile.parentFile == root) { "Destino de backup escapou da pasta autorizada" }
 
         val command = buildString {
             append("dd if=")
@@ -61,6 +67,7 @@ class LocalNandManager {
             "Backup root falhou (${result.code}): ${(result.err + result.out).joinToString("\n")}".trim()
         }
         check(outputFile.isFile && outputFile.length() > 0L) { "Backup concluído sem produzir dados" }
+        outputFile
     }
 
     private fun isSafeBlockPath(path: String): Boolean =
@@ -72,5 +79,6 @@ class LocalNandManager {
 
     companion object {
         private val SAFE_BLOCK_PATH = Regex("^/dev/block/[A-Za-z0-9._/-]+${'$'}")
+        private val SAFE_OUTPUT_NAME = Regex("^[A-Za-z0-9._-]+\\.img${'$'}")
     }
 }
