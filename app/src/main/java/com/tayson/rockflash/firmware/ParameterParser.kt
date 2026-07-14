@@ -26,7 +26,12 @@ object ParameterParser {
             .trim()
         if (partitionText.isEmpty()) throw ParameterParseException("Lista de partições vazia")
 
-        val partitions = partitionPattern.findAll(partitionText).map { match ->
+        val partitions = partitionText.split(',').mapIndexed { index, rawSegment ->
+            val segment = rawSegment.trim()
+            if (segment.isEmpty()) throw ParameterParseException("Segmento vazio na posição ${index + 1}")
+            val match = partitionPattern.matchEntire(segment)
+                ?: throw ParameterParseException("Segmento de partição inválido: $segment")
+
             val name = match.groups["name"]?.value?.trim().orEmpty()
             if (name.isEmpty()) throw ParameterParseException("Partição sem nome")
 
@@ -44,9 +49,8 @@ object ParameterParser {
                 sectorCount = sectorCount,
                 flags = match.groups["flags"]?.value.orEmpty(),
             )
-        }.toList()
+        }
 
-        if (partitions.isEmpty()) throw ParameterParseException("Nenhuma partição válida encontrada")
         validate(partitions)
         return partitions
     }
@@ -58,6 +62,14 @@ object ParameterParser {
         partitions.forEachIndexed { index, partition ->
             if (partition.sectorCount == null && index != partitions.lastIndex) {
                 throw ParameterParseException("Partição de tamanho restante deve ser a última: ${partition.name}")
+            }
+            partition.sectorCount?.let { sectors ->
+                try {
+                    Math.multiplyExact(sectors, SECTOR_SIZE_BYTES)
+                    Math.addExact(partition.startLba, sectors)
+                } catch (error: ArithmeticException) {
+                    throw ParameterParseException("Overflow no intervalo da partição ${partition.name}", error)
+                }
             }
         }
 
@@ -83,4 +95,5 @@ object ParameterParser {
     }
 
     private const val MTD_PARTS_MARKER = "mtdparts="
+    private const val SECTOR_SIZE_BYTES = 512L
 }
