@@ -18,6 +18,9 @@ object ParameterParser {
         val payload = text.substring(markerIndex + MTD_PARTS_MARKER.length)
         val deviceSeparator = payload.indexOf(':')
         if (deviceSeparator < 0) throw ParameterParseException("Separador do dispositivo mtdparts não encontrado")
+        if (payload.substring(0, deviceSeparator).isBlank()) {
+            throw ParameterParseException("Dispositivo mtdparts vazio")
+        }
 
         val partitionText = payload.substring(deviceSeparator + 1)
             .lineSequence()
