@@ -7,6 +7,12 @@ import android.hardware.usb.UsbManager
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+
+enum class RockUsbTransferPhase {
+    WRITING,
+    VERIFYING,
+}
 
 /**
  * Implementação interna do protocolo RockUSB usado pelo rkdeveloptool.
@@ -118,7 +124,7 @@ class RockUsbDirectBackend(context: Context) {
             totalSectors: Long,
             onProgress: (completedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
         ) {
-            require(totalSectors in 1..0x1_0000_0000L) { "Tamanho de backup inválido" }
+            require(totalSectors in 1..MAX_ADDRESSABLE_SECTORS) { "Tamanho de backup inválido" }
             output.parentFile?.mkdirs()
             val totalBytes = Math.multiplyExact(totalSectors, SECTOR_SIZE.toLong())
             output.outputStream().buffered(BUFFER_SIZE).use { stream ->
@@ -144,28 +150,66 @@ class RockUsbDirectBackend(context: Context) {
             onProgress: (completedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
         ) {
             require(image.isFile && image.length() > 0L) { "Imagem inexistente ou vazia" }
-            require(image.length() % SECTOR_SIZE == 0L) {
+            writeStreamAtLba(
+                openSource = { image.inputStream() },
+                imageSizeBytes = image.length(),
+                startSector = startSector,
+                verify = verify,
+            ) { _, completed, total ->
+                onProgress(completed, total)
+            }
+        }
+
+        /**
+         * Grava uma imagem proveniente do Storage Access Framework sem copiá-la
+         * para o armazenamento interno. O fornecedor da URI deve permitir uma
+         * segunda abertura quando a verificação por readback estiver habilitada.
+         */
+        fun writeStreamAtLba(
+            openSource: () -> InputStream,
+            imageSizeBytes: Long,
+            startSector: Long,
+            verify: Boolean = true,
+            onProgress: (
+                phase: RockUsbTransferPhase,
+                completedBytes: Long,
+                totalBytes: Long,
+            ) -> Unit = { _, _, _ -> },
+        ) {
+            require(imageSizeBytes > 0L) { "Imagem vazia" }
+            require(imageSizeBytes % SECTOR_SIZE == 0L) {
                 "Imagem deve possuir tamanho múltiplo de $SECTOR_SIZE bytes"
             }
-            val totalSectors = image.length() / SECTOR_SIZE
-            require(startSector + totalSectors <= 0x1_0000_0000L) { "Imagem ultrapassa o espaço LBA endereçável" }
+            require(startSector >= 0L) { "LBA inicial negativo" }
 
-            image.inputStream().buffered(BUFFER_SIZE).use { stream ->
-                var sector = startSector
-                var completed = 0L
-                val buffer = ByteArray(MAX_SECTORS_PER_COMMAND * SECTOR_SIZE)
-                while (completed < image.length()) {
-                    val wanted = minOf(buffer.size.toLong(), image.length() - completed).toInt()
-                    readFully(stream, buffer, wanted)
-                    val block = if (wanted == buffer.size) buffer else buffer.copyOf(wanted)
-                    writeLba(sector, block)
-                    sector += wanted / SECTOR_SIZE
-                    completed += wanted
-                    onProgress(completed, image.length())
-                }
+            val totalSectors = imageSizeBytes / SECTOR_SIZE
+            val endSector = try {
+                Math.addExact(startSector, totalSectors)
+            } catch (error: ArithmeticException) {
+                throw IllegalArgumentException("Overflow no intervalo LBA da imagem", error)
+            }
+            require(endSector <= MAX_ADDRESSABLE_SECTORS) {
+                "Imagem ultrapassa o espaço LBA endereçável"
             }
 
-            if (verify) verifyFileAtLba(image, startSector, onProgress)
+            transferSource(
+                openSource = openSource,
+                imageSizeBytes = imageSizeBytes,
+                startSector = startSector,
+                phase = RockUsbTransferPhase.WRITING,
+                onProgress = onProgress,
+            ) { sector, block ->
+                writeLba(sector, block)
+            }
+
+            if (verify) {
+                verifyStreamAtLba(
+                    openSource = openSource,
+                    imageSizeBytes = imageSizeBytes,
+                    startSector = startSector,
+                    onProgress = onProgress,
+                )
+            }
         }
 
         fun reset(subCode: Int = 0) {
@@ -173,29 +217,52 @@ class RockUsbDirectBackend(context: Context) {
             transport.executeOut(command = command, commandLength = 6)
         }
 
-        private fun verifyFileAtLba(
-            image: File,
+        private fun transferSource(
+            openSource: () -> InputStream,
+            imageSizeBytes: Long,
             startSector: Long,
-            onProgress: (completedBytes: Long, totalBytes: Long) -> Unit,
+            phase: RockUsbTransferPhase,
+            onProgress: (RockUsbTransferPhase, Long, Long) -> Unit,
+            consumeBlock: (sector: Long, block: ByteArray) -> Unit,
         ) {
-            image.inputStream().buffered(BUFFER_SIZE).use { stream ->
+            openSource().buffered(BUFFER_SIZE).use { stream ->
                 var sector = startSector
                 var completed = 0L
-                val expected = ByteArray(MAX_SECTORS_PER_COMMAND * SECTOR_SIZE)
-                while (completed < image.length()) {
-                    val wanted = minOf(expected.size.toLong(), image.length() - completed).toInt()
-                    readFully(stream, expected, wanted)
-                    val actual = readLba(sector, wanted / SECTOR_SIZE)
-                    for (index in 0 until wanted) {
-                        if (expected[index] != actual[index]) {
-                            throw IOException(
-                                "Verificação RockUSB falhou no byte ${completed + index} (LBA ${sector + index / SECTOR_SIZE})",
-                            )
-                        }
-                    }
+                val buffer = ByteArray(MAX_SECTORS_PER_COMMAND * SECTOR_SIZE)
+                while (completed < imageSizeBytes) {
+                    val wanted = minOf(buffer.size.toLong(), imageSizeBytes - completed).toInt()
+                    readFully(stream, buffer, wanted)
+                    val block = if (wanted == buffer.size) buffer else buffer.copyOf(wanted)
+                    consumeBlock(sector, block)
                     sector += wanted / SECTOR_SIZE
                     completed += wanted
-                    onProgress(completed, image.length())
+                    onProgress(phase, completed, imageSizeBytes)
+                }
+            }
+        }
+
+        private fun verifyStreamAtLba(
+            openSource: () -> InputStream,
+            imageSizeBytes: Long,
+            startSector: Long,
+            onProgress: (RockUsbTransferPhase, Long, Long) -> Unit,
+        ) {
+            transferSource(
+                openSource = openSource,
+                imageSizeBytes = imageSizeBytes,
+                startSector = startSector,
+                phase = RockUsbTransferPhase.VERIFYING,
+                onProgress = onProgress,
+            ) { sector, expected ->
+                val actual = readLba(sector, expected.size / SECTOR_SIZE)
+                for (index in expected.indices) {
+                    if (expected[index] != actual[index]) {
+                        throw IOException(
+                            "Verificação RockUSB falhou no byte " +
+                                "${(sector - startSector) * SECTOR_SIZE + index} " +
+                                "(LBA ${sector + index / SECTOR_SIZE})",
+                        )
+                    }
                 }
             }
         }
@@ -243,6 +310,7 @@ class RockUsbDirectBackend(context: Context) {
         private const val DATA_TIMEOUT_MS = 120_000
         private const val FLASH_INFO_MINIMUM = 11
         private const val RW_METHOD_IMAGE = 0
+        private const val MAX_ADDRESSABLE_SECTORS = 0x1_0000_0000L
 
         private const val OP_READ_FLASH_ID = 0x01
         private const val OP_READ_LBA = 0x14
@@ -274,11 +342,12 @@ class RockUsbDirectBackend(context: Context) {
                 ((bytes[offset + 2].toLong() and 0xFF) shl 16) or
                 ((bytes[offset + 3].toLong() and 0xFF) shl 24)
 
-        private fun readFully(stream: java.io.InputStream, buffer: ByteArray, length: Int) {
+        private fun readFully(stream: InputStream, buffer: ByteArray, length: Int) {
             var offset = 0
             while (offset < length) {
                 val read = stream.read(buffer, offset, length - offset)
                 if (read < 0) throw IOException("Fim inesperado do arquivo")
+                if (read == 0) throw IOException("Leitura sem progresso no arquivo")
                 offset += read
             }
         }
