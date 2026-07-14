@@ -24,6 +24,7 @@ import com.tayson.rockflash.usb.UsbHostInspector
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.tukaani.xz.XZInputStream
@@ -37,6 +38,8 @@ class ArmbianWizardActivity : AppCompatActivity() {
     private val blockBackend = UsbBlockBackend()
 
     private var backendStatus: RkBackendStatus? = null
+    private var backendRefreshJob: Job? = null
+    private var backendRefreshGeneration = 0L
     private var pendingRole: ImageRole? = null
     private var ubootFile: File? = null
     private var armbianFile: File? = null
@@ -77,6 +80,12 @@ class ArmbianWizardActivity : AppCompatActivity() {
         if (!busy) refreshEnvironment(showFeedback = false)
     }
 
+    override fun onDestroy() {
+        backendRefreshGeneration++
+        backendRefreshJob?.cancel()
+        super.onDestroy()
+    }
+
     private fun configureActions() = with(binding) {
         closeButton.setOnClickListener { finish() }
         detectBoxButton.setOnClickListener { detectBox() }
@@ -105,11 +114,15 @@ class ArmbianWizardActivity : AppCompatActivity() {
     }
 
     private fun refreshEnvironment(showFeedback: Boolean) {
-        lifecycleScope.launch {
+        val generation = ++backendRefreshGeneration
+        backendRefreshJob?.cancel()
+        backendRefreshJob = lifecycleScope.launch {
             val status = rkBackend.status(force = true)
+            if (generation != backendRefreshGeneration) return@launch
+
             val changed = status != backendStatus
             backendStatus = status
-            if (changed || showFeedback) appendLog("AMBIENTE: ${status.summary}")
+            if (changed || showFeedback) appendLog("AMBIENTE: ${status.diagnostic}")
             updateUi()
             if (showFeedback) showBackendStatusDialog(status)
         }
@@ -126,8 +139,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
             .setTitle("Diagnóstico do ambiente")
             .setMessage(
                 buildString {
-                    appendLine(status.summary)
-                    if (status.details.isNotBlank()) appendLine(status.details)
+                    appendLine(status.diagnostic)
                     appendLine()
                     appendLine("Dispositivos USB Host:")
                     append(usbText)
@@ -171,8 +183,8 @@ class ArmbianWizardActivity : AppCompatActivity() {
             val status = rkBackend.status(force = true)
             backendStatus = status
             if (!status.ready) {
-                appendLog("A TV Box foi detectada pelo Android, mas o diagnóstico profundo não pode iniciar: ${status.summary}")
-                showMessage("TV Box detectada. Configure o backend root para consultar chip e flash.")
+                appendLog("A TV Box foi detectada pelo Android, mas o diagnóstico profundo não pode iniciar:\n${status.diagnostic}")
+                showMessage(status.summary)
                 return@runBusy
             }
 
@@ -267,7 +279,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
                         .setTitle("Pendrive detectado")
                         .setMessage(
                             hostDevices.joinToString("\n") { "• ${it.label}" } +
-                                "\n\nA detecção USB funciona sem root, mas a gravação bruta do backend atual requer acesso root a /dev/sdX.",
+                                "\n\nA detecção USB funciona sem root, mas a gravação bruta do backend atual requer acesso root a /dev/sdX.\n\n${status.diagnostic}",
                         )
                         .setPositiveButton("OK", null)
                         .show()
@@ -397,6 +409,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
         val status = backendStatus
         if (status?.ready == true) return true
         showMessage(status?.summary ?: "Diagnóstico do backend ainda não foi concluído")
+        status?.let { appendLog("BACKEND INDISPONÍVEL: ${it.diagnostic}") }
         refreshEnvironment(showFeedback = true)
         return false
     }
@@ -509,6 +522,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
             append("\nArmazenamento: ${flashKind.name}")
             append("\nTamanho: ${flashSizeMb?.let { "$it MB" } ?: "desconhecido"}")
             append("\nBackend: ${status?.summary ?: "verificando…"}")
+            status?.failureExitCode?.let { append(" (código $it)") }
         }
         backupStatusText.text = backupFile?.let { "${it.absolutePath}\n${formatBytes(it.length())}" }
             ?: "Nenhum backup criado neste assistente"
