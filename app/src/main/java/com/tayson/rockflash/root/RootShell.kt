@@ -1,7 +1,6 @@
 package com.tayson.rockflash.root
 
 import com.tayson.rockflash.model.CommandResult
-import java.io.File
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -50,15 +49,16 @@ class RootShell(
 
         var sawDenied = false
         var sawExecutionError = false
-        var lastFailure = "Nenhum executável su foi localizado"
+        val failures = mutableListOf<String>()
 
         for (candidate in candidates.distinct()) {
-            if (candidate.startsWith('/') && !File(candidate).canExecute()) continue
-
+            // KernelSU e APatch podem fornecer /system/bin/su virtualmente no execve,
+            // mesmo quando File.exists()/canExecute() retorna false para o processo do app.
+            // Por isso cada caminho precisa ser executado de fato, sem preflight pelo java.io.File.
             val outcome = runProcess(candidate, "id -u", PROBE_TIMEOUT_SECONDS)
             val launchFailure = outcome.launchFailure
             if (launchFailure != null) {
-                lastFailure = launchFailure.message
+                failures += "$candidate: ${launchFailure.message}"
                 when (launchFailure.kind) {
                     LaunchFailureKind.MISSING -> Unit
                     LaunchFailureKind.SECURITY,
@@ -78,9 +78,10 @@ class RootShell(
             }
 
             sawDenied = true
-            lastFailure = outcome.output.ifBlank {
+            val reason = outcome.output.ifBlank {
                 if (!outcome.completed) "Tempo limite aguardando autorização root" else "su retornou código ${outcome.exitCode}"
             }
+            failures += "$candidate: $reason"
         }
 
         val state = when {
@@ -88,7 +89,8 @@ class RootShell(
             sawExecutionError -> RootState.ERROR
             else -> RootState.MISSING
         }
-        RootProbe(state = state, details = lastFailure).also { cachedProbe = it }
+        val details = failures.joinToString(separator = "\n").ifBlank { "Nenhum candidato de root pôde ser executado" }
+        RootProbe(state = state, details = details).also { cachedProbe = it }
     }
 
     fun invalidateProbe() {
@@ -103,7 +105,10 @@ class RootShell(
                 return@withContext CommandResult(
                     success = false,
                     exitCode = EXIT_ROOT_UNAVAILABLE,
-                    output = probe.summary,
+                    output = buildString {
+                        append(probe.summary)
+                        if (probe.details.isNotBlank()) append('\n').append(probe.details)
+                    },
                     durationMs = System.currentTimeMillis() - startedAt,
                 )
             }
@@ -232,12 +237,14 @@ class RootShell(
 
         val DEFAULT_SU_CANDIDATES = listOf(
             "/system/bin/su",
+            "/system/bin/kp",
             "/system/xbin/su",
             "/sbin/su",
             "/su/bin/su",
             "/debug_ramdisk/su",
             "/data/adb/ksu/bin/su",
             "su",
+            "kp",
         )
 
         internal fun classifyLaunchFailure(error: Throwable): LaunchFailureKind {
