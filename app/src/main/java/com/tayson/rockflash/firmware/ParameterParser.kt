@@ -30,8 +30,11 @@ object ParameterParser {
             val name = match.groups["name"]?.value?.trim().orEmpty()
             if (name.isEmpty()) throw ParameterParseException("Partição sem nome")
 
-            val startLba = parseUnsigned(match.groups.getValue("offset").value, "offset de $name")
-            val sizeToken = match.groups.getValue("size").value
+            val offsetToken = match.groups["offset"]?.value
+                ?: throw ParameterParseException("Offset ausente em $name")
+            val sizeToken = match.groups["size"]?.value
+                ?: throw ParameterParseException("Tamanho ausente em $name")
+            val startLba = parseUnsigned(offsetToken, "offset de $name")
             val sectorCount = if (sizeToken == "-") null else parseUnsigned(sizeToken, "tamanho de $name")
             if (sectorCount == 0L) throw ParameterParseException("Partição $name possui tamanho zero")
 
