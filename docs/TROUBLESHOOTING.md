@@ -35,7 +35,7 @@ Debug:   com.tayson.rockflash.debug
 Release: com.tayson.rockflash
 ```
 
-### Como corrigir o backend legado
+### Como resolver
 
 1. Atualize para `0.4.0-alpha02` ou superior.
 2. Confirme que o Superusuário está habilitado para o pacote correto.
