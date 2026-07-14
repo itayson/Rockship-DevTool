@@ -23,17 +23,11 @@ class RootShellTest {
     }
 
     @Test
-    fun executableThatRejectsAccessIsReportedAsDenied() = runBlocking {
-        val fakeSu = File.createTempFile("fake-su-denied", ".sh").apply {
-            writeText("#!/bin/sh\necho denied\nexit 1\n")
-            setExecutable(true)
-            deleteOnExit()
-        }
-
-        val probe = RootShell(candidates = listOf(fakeSu.absolutePath)).probe(force = true)
+    fun executableWithoutUidZeroIsReportedAsDenied() = runBlocking {
+        val probe = RootShell(candidates = listOf("/bin/sh")).probe(force = true)
 
         assertEquals(RootState.DENIED, probe.state)
-        assertTrue(probe.details.contains("denied"))
+        assertFalse(probe.available)
     }
 
     @Test
@@ -64,5 +58,24 @@ class RootShellTest {
             LaunchFailureKind.OTHER,
             RootShell.classifyLaunchFailure(IOException("Permission denied")),
         )
+    }
+
+    @Test
+    fun wrappedCommandTracksRootShellPidAndCleansMarker() {
+        val command = RootShell.buildWrappedCommand("printf test", "/data/local/tmp/test pid")
+
+        assertTrue(command.contains("printf '%s\\n' \"$$\""))
+        assertTrue(command.contains("( printf test )"))
+        assertTrue(command.contains("rm -f '/data/local/tmp/test pid'"))
+    }
+
+    @Test
+    fun terminationCommandCollectsProcDescendantsBeforeKilling() {
+        val command = RootShell.buildTerminationCommand("/data/local/tmp/test.pid")
+
+        assertTrue(command.contains("/proc/\"$1\"/task/\"$1\"/children"))
+        assertTrue(command.contains("kill -TERM"))
+        assertTrue(command.contains("kill -KILL"))
+        assertTrue(command.contains("rm -f \"$pid_file\""))
     }
 }
