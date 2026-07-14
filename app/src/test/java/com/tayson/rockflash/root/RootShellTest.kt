@@ -64,7 +64,7 @@ class RootShellTest {
     fun wrappedCommandTracksRootShellPidAndCleansMarker() {
         val command = RootShell.buildWrappedCommand("printf test", "/data/local/tmp/test pid")
 
-        assertTrue(command.contains("printf '%s\\n' \"$$\""))
+        assertTrue(command.contains("printf '%s\\n' \"${'$'}${'$'}\""))
         assertTrue(command.contains("( printf test )"))
         assertTrue(command.contains("rm -f '/data/local/tmp/test pid'"))
     }
@@ -73,9 +73,9 @@ class RootShellTest {
     fun terminationCommandCollectsProcDescendantsBeforeKilling() {
         val command = RootShell.buildTerminationCommand("/data/local/tmp/test.pid")
 
-        assertTrue(command.contains("/proc/\"$1\"/task/\"$1\"/children"))
+        assertTrue(command.contains("/proc/\"${'$'}1\"/task/\"${'$'}1\"/children"))
         assertTrue(command.contains("kill -TERM"))
         assertTrue(command.contains("kill -KILL"))
-        assertTrue(command.contains("rm -f \"$pid_file\""))
+        assertTrue(command.contains("rm -f \"${'$'}pid_file\""))
     }
 }
