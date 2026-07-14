@@ -43,6 +43,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
     private var multitoolFile: File? = null
     private var selectedBlockDevice: RemovableBlockDevice? = null
     private var usbHostSummary: String? = null
+    private var rockchipIdentity: String? = null
     private var rockchipNode: String? = null
     private var flashSizeMb: Long? = null
     private var flashKind: FlashKind = FlashKind.UNKNOWN
@@ -147,12 +148,17 @@ class ArmbianWizardActivity : AppCompatActivity() {
     private fun detectBox() {
         val device = usbController.findDevices().firstOrNull()
         if (device == null) {
-            rockchipNode = null
-            flashSizeMb = null
-            flashKind = FlashKind.UNKNOWN
+            clearDeviceScopedState("TV Box desconectada")
+            rockchipIdentity = null
             showMessage("Nenhuma TV Box Rockchip VID 2207 foi detectada")
             updateUi()
             return
+        }
+
+        val newIdentity = "${device.vidPid}:${device.device.deviceId}"
+        if (rockchipIdentity != newIdentity) {
+            clearDeviceScopedState("Novo dispositivo Rockchip detectado; backup e autorizações anteriores foram invalidados")
+            rockchipIdentity = newIdentity
         }
 
         rockchipNode = device.deviceName
@@ -193,6 +199,17 @@ class ArmbianWizardActivity : AppCompatActivity() {
         }
     }
 
+    private fun clearDeviceScopedState(reason: String) {
+        if (rockchipNode != null || backupFile != null || binding.existingBackupCheckBox.isChecked) {
+            appendLog(reason)
+        }
+        rockchipNode = null
+        flashSizeMb = null
+        flashKind = FlashKind.UNKNOWN
+        backupFile = null
+        binding.existingBackupCheckBox.isChecked = false
+    }
+
     private fun createFullBackup() {
         if (!requireBackendReady()) return
         val node = rockchipNode
@@ -227,6 +244,9 @@ class ArmbianWizardActivity : AppCompatActivity() {
     }
 
     private fun detectUsbTargets() {
+        selectedBlockDevice = null
+        updateUi()
+
         val hostDevices = usbHostInspector.massStorageDevices()
         usbHostSummary = when {
             hostDevices.isEmpty() -> "Nenhum pendrive Mass Storage detectado pelo Android"
@@ -239,8 +259,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
         runBusy("Procurando destino bruto para gravação…") {
             val status = rkBackend.status(force = true)
             backendStatus = status
-            if (!status.ready) {
-                selectedBlockDevice = null
+            if (!status.root.available) {
                 if (hostDevices.isEmpty()) {
                     showMessage("Nenhum pendrive foi detectado pelo Android")
                 } else {
@@ -269,7 +288,14 @@ class ArmbianWizardActivity : AppCompatActivity() {
                         appendLog("USB selecionado: ${devices[index].label}")
                         updateUi()
                     }
-                    .setNegativeButton("Cancelar", null)
+                    .setOnCancelListener {
+                        selectedBlockDevice = null
+                        updateUi()
+                    }
+                    .setNegativeButton("Cancelar") { _, _ ->
+                        selectedBlockDevice = null
+                        updateUi()
+                    }
                     .show()
             }.onFailure { error ->
                 selectedBlockDevice = null
@@ -280,7 +306,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
     }
 
     private fun writeImageToUsb(file: File?, label: String) {
-        if (!requireBackendReady()) return
+        if (!requireRootAvailable()) return
         val image = file
         val target = selectedBlockDevice
         if (image == null || !image.isFile) {
@@ -357,6 +383,14 @@ class ArmbianWizardActivity : AppCompatActivity() {
             appendLog("BOOTSTRAP exit=${result.exitCode}: ${result.output}")
             showMessage(if (result.success) "Bootstrap instalado" else "Falha na instalação do bootstrap")
         }
+    }
+
+    private fun requireRootAvailable(): Boolean {
+        val status = backendStatus
+        if (status?.root?.available == true) return true
+        showMessage(status?.root?.summary ?: "Diagnóstico do root ainda não foi concluído")
+        refreshEnvironment(showFeedback = true)
+        return false
     }
 
     private fun requireBackendReady(): Boolean {
@@ -467,6 +501,7 @@ class ArmbianWizardActivity : AppCompatActivity() {
 
     private fun updateUi() = with(binding) {
         val status = backendStatus
+        val rootAvailable = status?.root?.available == true
         val backendReady = status?.ready == true
         boxStatusText.text = buildString {
             append("Rockchip: ")
@@ -491,13 +526,14 @@ class ArmbianWizardActivity : AppCompatActivity() {
         selectArmbianButton.isEnabled = enabled
         selectMultitoolButton.isEnabled = enabled
         detectUsbButton.isEnabled = enabled
-        writeArmbianUsbButton.isEnabled = enabled && backendReady && armbianFile != null && selectedBlockDevice != null
-        writeMultitoolUsbButton.isEnabled = enabled && backendReady && multitoolFile != null && selectedBlockDevice != null
+        writeArmbianUsbButton.isEnabled = enabled && rootAvailable && armbianFile != null && selectedBlockDevice != null
+        writeMultitoolUsbButton.isEnabled = enabled && rootAvailable && multitoolFile != null && selectedBlockDevice != null
         copyArmbianButton.isEnabled = enabled && armbianFile != null
         installBootstrapButton.isEnabled = enabled && backendReady && ubootFile != null && rockchipNode != null
 
         finalInstructionsText.text = when {
-            !backendReady -> "O aplicativo não vai mais encerrar com erro de su ausente. Seleção, validação e descompactação funcionam; comandos Rockchip e gravação bruta permanecem desativados até o diagnóstico indicar backend pronto. Toque em Atualizar estado para ver os detalhes."
+            !rootAvailable -> "O aplicativo não vai mais encerrar com erro de su ausente. Seleção, validação e descompactação funcionam; gravação bruta e comandos Rockchip permanecem desativados até o diagnóstico indicar root disponível."
+            !backendReady -> "Root está disponível. A gravação de pendrive por /dev/sdX pode funcionar, mas os comandos da TV Box exigem o rkdeveloptool instalado no Termux. Toque em Atualizar estado para ver os detalhes."
             flashKind == FlashKind.NAND && multitoolFile != null && armbianFile != null && ubootFile != null ->
                 "Para NAND: grave o Multitool no pendrive, reconecte o pendrive ao celular, copie a imagem Armbian legacy para images, instale o bootstrap e inicialize a TV Box pelo USB OTG. No Multitool escolha Burn Armbian image via steP-nand."
             flashKind == FlashKind.NAND && armbianFile != null ->
