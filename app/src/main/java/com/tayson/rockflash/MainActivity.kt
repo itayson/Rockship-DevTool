@@ -24,6 +24,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.tayson.rockflash.databinding.ActivityMainBinding
 import com.tayson.rockflash.nativebridge.NativeBridge
 import com.tayson.rockflash.report.DeviceReport
+import com.tayson.rockflash.root.RkBackendStatus
 import com.tayson.rockflash.root.RkDevelopToolBackend
 import com.tayson.rockflash.safety.SafetyGate
 import com.tayson.rockflash.safety.SafetySnapshot
@@ -44,8 +45,9 @@ class MainActivity : AppCompatActivity() {
     private var selectedDevice: RockchipUsbDevice? = null
     private var openConnection: UsbDeviceConnection? = null
     private var safetySnapshot: SafetySnapshot? = null
+    private var backendStatus: RkBackendStatus? = null
     private var stagedFile: File? = null
-    private var busy: Boolean = false
+    private var busy = false
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) stageSelectedImage(uri)
@@ -81,9 +83,10 @@ class MainActivity : AppCompatActivity() {
         registerUsbReceiver()
         configureActions()
         appendLog("Aplicativo iniciado")
-        appendLog("Backend: ${NativeBridge.backendVersion()}")
+        appendLog("Backend nativo: ${NativeBridge.backendVersion()}")
         refreshSafety()
         refreshDevices(intent.usbDeviceExtra())
+        refreshBackendStatus(showFeedback = false)
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -95,6 +98,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshSafety()
+        if (!busy) refreshBackendStatus(showFeedback = false)
     }
 
     override fun onDestroy() {
@@ -104,7 +108,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configureActions() = with(binding) {
-        scanButton.setOnClickListener { refreshDevices() }
+        scanButton.setOnClickListener {
+            refreshDevices()
+            refreshBackendStatus(showFeedback = false)
+        }
         permissionButton.setOnClickListener {
             selectedDevice?.let { usbController.requestPermission(it.device, ACTION_USB_PERMISSION) }
         }
@@ -131,6 +138,24 @@ class MainActivity : AppCompatActivity() {
 
         clearLogButton.setOnClickListener { logText.text = "" }
         copyReportButton.setOnClickListener { copyReport() }
+    }
+
+    private fun refreshBackendStatus(showFeedback: Boolean) {
+        lifecycleScope.launch {
+            val status = rootBackend.status(force = showFeedback)
+            val changed = status != backendStatus
+            backendStatus = status
+            if (changed || showFeedback) appendLog("AMBIENTE: ${status.summary}")
+            updateEnvironmentText()
+            updateButtons()
+            if (showFeedback) {
+                MaterialAlertDialogBuilder(this@MainActivity)
+                    .setTitle("Diagnóstico do backend")
+                    .setMessage("${status.summary}\n\n${status.details}")
+                    .setPositiveButton("OK", null)
+                    .show()
+            }
+        }
     }
 
     private fun refreshDevices(preferred: UsbDevice? = null) {
@@ -163,7 +188,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshSafety() {
         safetySnapshot = SafetyGate.snapshot(this)
-        binding.safetyText.text = safetySnapshot?.summary().orEmpty()
+        updateEnvironmentText()
+    }
+
+    private fun updateEnvironmentText() {
+        binding.safetyText.text = buildString {
+            append(safetySnapshot?.summary().orEmpty())
+            appendLine()
+            append(backendStatus?.summary ?: "Backend: verificando root e rkdeveloptool…")
+        }.trim()
     }
 
     private fun openNativeSession() {
@@ -192,12 +225,22 @@ class MainActivity : AppCompatActivity() {
         openConnection = null
     }
 
+    private fun requireBackendReady(): Boolean {
+        val status = backendStatus
+        if (status?.ready == true) return true
+        showMessage(status?.summary ?: "O diagnóstico do backend ainda não terminou")
+        refreshBackendStatus(showFeedback = true)
+        return false
+    }
+
     private fun runReadOnly(command: RkDevelopToolBackend.ReadOnlyCommand) {
         val device = selectedDevice
         if (device == null) {
             showMessage("Conecte um dispositivo Rockchip primeiro")
             return
         }
+        if (!requireBackendReady()) return
+
         setBusy(true)
         appendLog("Executando ${command.name}…")
         lifecycleScope.launch {
@@ -269,11 +312,12 @@ class MainActivity : AppCompatActivity() {
             showMessage("Conecte um dispositivo Rockchip primeiro")
             return
         }
+        if (!requireBackendReady()) return
 
         refreshSafety()
         val safety = safetySnapshot ?: return
         if (!safety.writeReady && command != RkDevelopToolBackend.WriteCommand.RESET_DEVICE) {
-            showMessage("Gravação bloqueada: use bateria acima de 50% e desative a economia de energia")
+            showMessage("Gravação bloqueada: conecte o carregador, use bateria acima de 50% e desative a economia de energia")
             return
         }
 
@@ -290,9 +334,8 @@ class MainActivity : AppCompatActivity() {
             hint = confirmationWord
             isSingleLine = true
         }
-        val operation = operationName(command)
         val message = buildString {
-            appendLine(operation)
+            appendLine(operationName(command))
             if (file != null && command.requiresFile) appendLine("Arquivo: ${file.name} (${formatBytes(file.length())})")
             if (command == RkDevelopToolBackend.WriteCommand.WRITE_RAW_LBA) appendLine("Setor inicial: ${startSector ?: "inválido"}")
             if (command == RkDevelopToolBackend.WriteCommand.WRITE_PARTITION) appendLine("Partição: ${partition.orEmpty()}")
@@ -388,14 +431,15 @@ class MainActivity : AppCompatActivity() {
     private fun updateButtons() {
         val device = selectedDevice
         val permission = device != null && usbController.hasPermission(device.device)
-        val enabled = device != null && !busy
+        val deviceEnabled = device != null && !busy
+        val backendReady = backendStatus?.ready == true
         binding.scanButton.isEnabled = !busy
         binding.permissionButton.isEnabled = device != null && !permission && !busy
         binding.openNativeButton.isEnabled = permission && !busy
         binding.armbianWizardButton.isEnabled = !busy
         binding.selectImageButton.isEnabled = !busy
-        setCommandButtonsEnabled(enabled)
-        setWriteButtonsEnabled(enabled)
+        setCommandButtonsEnabled(deviceEnabled && backendReady)
+        setWriteButtonsEnabled(deviceEnabled && backendReady)
     }
 
     private fun setCommandButtonsEnabled(enabled: Boolean) = with(binding) {
