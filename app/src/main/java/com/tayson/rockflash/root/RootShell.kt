@@ -1,7 +1,6 @@
 package com.tayson.rockflash.root
 
 import com.tayson.rockflash.model.CommandResult
-import java.io.File
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -50,15 +49,20 @@ class RootShell(
 
         var sawDenied = false
         var sawExecutionError = false
-        var lastFailure = "Nenhum executável su foi localizado"
+        val failures = mutableListOf<String>()
 
         for (candidate in candidates.distinct()) {
-            if (candidate.startsWith('/') && !File(candidate).canExecute()) continue
-
+            // KernelSU e APatch podem fornecer /system/bin/su virtualmente no execve,
+            // mesmo quando File.exists()/canExecute() retorna false para o processo do app.
+            // Por isso cada caminho precisa ser executado de fato, sem preflight pelo java.io.File.
             val outcome = runProcess(candidate, "id -u", PROBE_TIMEOUT_SECONDS)
             val launchFailure = outcome.launchFailure
             if (launchFailure != null) {
-                lastFailure = launchFailure.message
+                failures += formatCandidateFailure(
+                    candidate = candidate,
+                    status = "falha ao iniciar (${launchFailure.kind.name.lowercase()})",
+                    output = launchFailure.message,
+                )
                 when (launchFailure.kind) {
                     LaunchFailureKind.MISSING -> Unit
                     LaunchFailureKind.SECURITY,
@@ -78,9 +82,12 @@ class RootShell(
             }
 
             sawDenied = true
-            lastFailure = outcome.output.ifBlank {
-                if (!outcome.completed) "Tempo limite aguardando autorização root" else "su retornou código ${outcome.exitCode}"
+            val status = if (!outcome.completed) {
+                "tempo limite aguardando autorização root"
+            } else {
+                "retornou código ${outcome.exitCode}"
             }
+            failures += formatCandidateFailure(candidate, status, outcome.output)
         }
 
         val state = when {
@@ -88,7 +95,11 @@ class RootShell(
             sawExecutionError -> RootState.ERROR
             else -> RootState.MISSING
         }
-        RootProbe(state = state, details = lastFailure).also { cachedProbe = it }
+        val details = boundedText(
+            failures.joinToString(separator = "\n").ifBlank { "Nenhum candidato de root pôde ser executado" },
+            MAX_DIAGNOSTIC_OUTPUT,
+        )
+        RootProbe(state = state, details = details).also { cachedProbe = it }
     }
 
     fun invalidateProbe() {
@@ -100,10 +111,14 @@ class RootShell(
             val startedAt = System.currentTimeMillis()
             val probe = probe(force = cachedProbe?.available != true)
             if (!probe.available) {
+                val diagnostic = buildString {
+                    append(probe.summary)
+                    if (probe.details.isNotBlank()) append('\n').append(probe.details)
+                }
                 return@withContext CommandResult(
                     success = false,
                     exitCode = EXIT_ROOT_UNAVAILABLE,
-                    output = probe.summary,
+                    output = boundedText(diagnostic, MAX_DIAGNOSTIC_OUTPUT),
                     durationMs = System.currentTimeMillis() - startedAt,
                 )
             }
@@ -163,7 +178,11 @@ class RootShell(
                 process.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
                         synchronized(output) {
-                            if (output.length < MAX_CAPTURED_OUTPUT) output.appendLine(line)
+                            val remaining = MAX_CAPTURED_OUTPUT - output.length
+                            if (remaining > 0) {
+                                val lineWithBreak = "$line\n"
+                                output.append(lineWithBreak.take(remaining))
+                            }
                         }
                     }
                 }
@@ -223,6 +242,9 @@ class RootShell(
         const val EXIT_LAUNCH_ERROR = 127
 
         private const val MAX_CAPTURED_OUTPUT = 2 * 1024 * 1024
+        private const val MAX_CANDIDATE_DIAGNOSTIC = 8 * 1024
+        private const val MAX_DIAGNOSTIC_OUTPUT = 64 * 1024
+        private const val TRUNCATION_MARKER = "\n… [diagnóstico truncado]"
         private const val PROBE_TIMEOUT_SECONDS = 8L
         private const val CLEANUP_TIMEOUT_SECONDS = 5L
         private const val READER_JOIN_MS = 3_000L
@@ -232,12 +254,14 @@ class RootShell(
 
         val DEFAULT_SU_CANDIDATES = listOf(
             "/system/bin/su",
+            "/system/bin/kp",
             "/system/xbin/su",
             "/sbin/su",
             "/su/bin/su",
             "/debug_ramdisk/su",
             "/data/adb/ksu/bin/su",
             "su",
+            "kp",
         )
 
         internal fun classifyLaunchFailure(error: Throwable): LaunchFailureKind {
@@ -249,6 +273,24 @@ class RootShell(
                 }
             }
             return LaunchFailureKind.OTHER
+        }
+
+        internal fun formatCandidateFailure(candidate: String, status: String, output: String): String {
+            val text = buildString {
+                append(candidate)
+                append(": ")
+                append(status)
+                if (output.isNotBlank()) append('\n').append(output.trim())
+            }
+            return boundedText(text, MAX_CANDIDATE_DIAGNOSTIC)
+        }
+
+        internal fun boundedText(text: String, maxChars: Int): String {
+            require(maxChars >= 0) { "maxChars não pode ser negativo" }
+            if (text.length <= maxChars) return text
+            if (maxChars == 0) return ""
+            if (maxChars <= TRUNCATION_MARKER.length) return text.take(maxChars)
+            return text.take(maxChars - TRUNCATION_MARKER.length) + TRUNCATION_MARKER
         }
 
         internal fun buildWrappedCommand(command: String, pidFile: String): String {
