@@ -12,8 +12,8 @@ android {
         applicationId = "com.tayson.rockflash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.6.0-alpha01"
+        versionCode = 8
+        versionName = "0.7.0-alpha01"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -107,4 +107,4 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 
-// 0.6 introduz a fundação RockFlashingTool: Compose, serviço USB e modo root via libsu.
+// 0.7 adiciona gravação integral de imagens brutas no LBA 0 com readback.
