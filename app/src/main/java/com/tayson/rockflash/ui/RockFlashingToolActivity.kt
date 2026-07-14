@@ -40,8 +40,8 @@ class RockFlashingToolActivity : ComponentActivity() {
                         )
                     },
                     onScan = {
-                        FlashingSessionStore.appendLog("Varredura manual solicitada")
-                        UsbHostForegroundService.start(this)
+                        FlashingSessionStore.appendLog("Varredura manual e sondagem root solicitadas")
+                        UsbHostForegroundService.probeConnections(this)
                     },
                     onClearLogs = FlashingSessionStore::clearLogs,
                 )
