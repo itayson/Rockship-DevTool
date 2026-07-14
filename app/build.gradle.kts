@@ -11,8 +11,8 @@ android {
         applicationId = "com.tayson.rockflash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0-alpha01"
+        versionCode = 4
+        versionName = "0.4.0-alpha01"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
