@@ -28,15 +28,19 @@ class AndroidBulkOnlyTransport private constructor(
         command: ByteArray,
         commandLength: Int,
         expectedLength: Int,
+        declaredTransferLength: Int = expectedLength,
         lun: Int = 0,
         timeoutMs: Int = DEFAULT_TIMEOUT_MS,
         allowShortPacket: Boolean = false,
     ): ByteArray {
         require(expectedLength >= 0)
+        require(declaredTransferLength in 0..expectedLength) {
+            "Tamanho declarado deve estar entre zero e o buffer máximo"
+        }
         val tag = nextTag.getAndIncrement()
         val cbw = BulkOnlyProtocol.buildCommandBlockWrapper(
             tag = tag,
-            transferLength = expectedLength,
+            transferLength = declaredTransferLength,
             directionIn = true,
             lun = lun,
             command = command,
@@ -45,9 +49,9 @@ class AndroidBulkOnlyTransport private constructor(
         writeExact(cbw, timeoutMs)
 
         val payload = when {
-            expectedLength == 0 -> ByteArray(0)
+            declaredTransferLength == 0 -> ByteArray(0)
             allowShortPacket -> readAtMost(expectedLength, timeoutMs)
-            else -> ByteArray(expectedLength).also { readExact(it, timeoutMs) }
+            else -> ByteArray(declaredTransferLength).also { readExact(it, timeoutMs) }
         }
         readAndValidateStatus(tag, timeoutMs)
         return payload
