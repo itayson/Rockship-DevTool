@@ -86,7 +86,7 @@ object BulkOnlyProtocol {
     fun getBe64(source: ByteArray, offset: Int): ULong {
         var value = 0uL
         repeat(8) { index ->
-            value = (value shl 8) or (source[offset + index].toULong() and 0xFFu)
+            value = (value shl 8) or (source[offset + index].toULong() and 0xFFuL)
         }
         return value
     }
