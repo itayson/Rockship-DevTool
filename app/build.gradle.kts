@@ -81,3 +81,5 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
 }
+
+// A alteração de versionName/versionCode aciona o workflow automático de release.
