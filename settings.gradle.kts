@@ -11,8 +11,13 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven(url = "https://jitpack.io") {
+            content {
+                includeGroup("com.github.topjohnwu.libsu")
+            }
+        }
     }
 }
 
-rootProject.name = "RockshipDevTool"
+rootProject.name = "RockFlashingTool"
 include(":app")

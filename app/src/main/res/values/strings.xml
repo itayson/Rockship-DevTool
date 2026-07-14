@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RockFlash DevTool</string>
+    <string name="app_name">RockFlashingTool</string>
     <string name="status_waiting">Aguardando dispositivo Rockchip</string>
     <string name="status_detected">Dispositivo Rockchip detectado</string>
     <string name="status_no_device">Nenhum dispositivo VID 2207 encontrado</string>

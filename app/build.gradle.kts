@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -11,8 +12,8 @@ android {
         applicationId = "com.tayson.rockflash"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.5.0-alpha01"
+        versionCode = 8
+        versionName = "0.7.0-alpha01"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -44,6 +45,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        compose = true
         buildConfig = true
     }
 
@@ -66,20 +68,43 @@ android {
 
     packaging {
         jniLibs.useLegacyPackaging = false
-        resources.excludes += setOf("META-INF/AL2.0", "META-INF/LGPL2.1")
+        resources.excludes += setOf(
+            "META-INF/AL2.0",
+            "META-INF/LGPL2.1",
+            "META-INF/DEPENDENCIES",
+        )
     }
 }
 
 dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val libsuVersion = "6.0.0"
+
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("com.google.android.material:material:1.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.tukaani:xz:1.10")
 
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    implementation("com.github.topjohnwu.libsu:core:$libsuVersion")
+    implementation("com.github.topjohnwu.libsu:service:$libsuVersion")
+
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 
-// 0.5 inicia o backend autônomo Android USB Host, sem root/Termux.
+// 0.7 adiciona gravação integral de imagens brutas no LBA 0 com readback.
