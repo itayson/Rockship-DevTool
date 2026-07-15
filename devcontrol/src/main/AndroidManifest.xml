@@ -19,7 +19,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="devcontrol"
+                    android:scheme="com.example.devcontrol"
                     android:host="oauth"
                     android:path="/callback" />
             </intent-filter>
