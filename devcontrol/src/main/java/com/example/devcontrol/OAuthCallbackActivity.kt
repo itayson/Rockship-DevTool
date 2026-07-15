@@ -11,13 +11,13 @@ class OAuthCallbackActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         val data = intent?.data
-        val validCallback = data?.scheme == "devcontrol" &&
+        val validCallback = data?.scheme == "com.example.devcontrol" &&
             data.host == "oauth" &&
             data.path == "/callback"
 
         val code = if (validCallback) data?.getQueryParameter("code").orEmpty() else ""
         val state = if (validCallback) data?.getQueryParameter("state").orEmpty() else ""
-        val error = if (validCallback) {
+        val callbackError = if (validCallback) {
             data?.getQueryParameter("error").orEmpty()
         } else {
             "callback_uri_invalida"
@@ -37,7 +37,7 @@ class OAuthCallbackActivity : Activity() {
         prefs.edit()
             .putString("last_code", code)
             .putString("last_state", state)
-            .putString("last_error", error)
+            .putString("last_error", callbackError)
             .apply()
 
         startActivity(
