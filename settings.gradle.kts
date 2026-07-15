@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "RockshipDevTool"
-include(":app")
+include(":app", ":devcontrol")

@@ -38,39 +38,46 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p app/build/ci-logs
-          ./gradlew :app:testDebugUnitTest --stacktrace 2>&1 | tee app/build/ci-logs/unit-tests.log
-      - name: Build debug APK
+          mkdir -p app/build/ci-logs devcontrol/build/ci-logs
+          ./gradlew :app:testDebugUnitTest :devcontrol:testDebugUnitTest --stacktrace 2>&1 | tee app/build/ci-logs/unit-tests.log
+      - name: Build debug APKs
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p app/build/ci-logs
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee app/build/ci-logs/assemble-debug.log
+          mkdir -p app/build/ci-logs devcontrol/build/ci-logs
+          ./gradlew :app:assembleDebug :devcontrol:assembleDebug --stacktrace 2>&1 | tee app/build/ci-logs/assemble-debug.log
       - name: Lint
         id: lint
         continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p app/build/ci-logs
-          ./gradlew :app:lintDebug --stacktrace 2>&1 | tee app/build/ci-logs/lint-debug.log
+          mkdir -p app/build/ci-logs devcontrol/build/ci-logs
+          ./gradlew :app:lintDebug :devcontrol:lintDebug --stacktrace 2>&1 | tee app/build/ci-logs/lint-debug.log
       - name: Lint summary
         if: always()
         run: |
           if [ "${{ steps.lint.outcome }}" = "failure" ]; then
-            echo "::warning::O APK foi compilado, mas o Android Lint encontrou problemas. O relatório foi anexado ao artefato."
+            echo "::warning::Os APKs foram compilados, mas o Android Lint encontrou problemas. Os relatórios foram anexados ao artefato."
           fi
-      - name: Upload APK and reports
+      - name: Upload APKs and reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rockflash-devtool-debug
+          name: android-debug-builds
           if-no-files-found: warn
           path: |
             app/build/outputs/apk/debug/app-debug.apk
+            devcontrol/build/outputs/apk/debug/devcontrol-debug.apk
             app/build/reports/tests/
             app/build/test-results/
             app/build/ci-logs/
             app/build/reports/lint-results-debug.html
             app/build/reports/lint-results-debug.txt
             app/build/reports/lint-results-debug.xml
+            devcontrol/build/reports/tests/
+            devcontrol/build/test-results/
+            devcontrol/build/ci-logs/
+            devcontrol/build/reports/lint-results-debug.html
+            devcontrol/build/reports/lint-results-debug.txt
+            devcontrol/build/reports/lint-results-debug.xml
