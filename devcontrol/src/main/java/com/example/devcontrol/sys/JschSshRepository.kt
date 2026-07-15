@@ -22,6 +22,10 @@ class JschSshRepository : SshRepository {
     override suspend fun exec(request: SshCommandRequest): Result<CommandResult> = withContext(Dispatchers.IO) {
         runCatching {
             require(request.command.isNotBlank()) { "O comando SSH não pode estar vazio" }
+            require(request.timeoutMs in MIN_COMMAND_TIMEOUT_MS..MAX_COMMAND_TIMEOUT_MS) {
+                "O timeout SSH deve estar entre 1 segundo e 10 minutos"
+            }
+
             val started = System.currentTimeMillis()
             val session = openSession(
                 host = request.host,
@@ -42,7 +46,7 @@ class JschSshRepository : SshRepository {
                     channel.setErrStream(stderr)
                     channel.connect(CONNECT_TIMEOUT_MS)
 
-                    val deadline = System.currentTimeMillis() + COMMAND_TIMEOUT_MS
+                    val deadline = System.currentTimeMillis() + request.timeoutMs
                     while (!channel.isClosed && System.currentTimeMillis() < deadline) {
                         Thread.sleep(100)
                     }
@@ -178,6 +182,7 @@ class JschSshRepository : SshRepository {
 
     private companion object {
         const val CONNECT_TIMEOUT_MS = 15_000
-        const val COMMAND_TIMEOUT_MS = 60_000L
+        const val MIN_COMMAND_TIMEOUT_MS = 1_000L
+        const val MAX_COMMAND_TIMEOUT_MS = 600_000L
     }
 }
