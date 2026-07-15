@@ -67,7 +67,8 @@ data class RepoSummary(
 data class GitHubAuthConfig(
     val clientId: String,
     val clientSecret: String,
-    val redirectUri: String = "devcontrol://oauth/callback",
+    val redirectUri: String = "com.example.devcontrol://oauth/callback",
+    val scope: String = "repo",
 )
 
 @Serializable
@@ -114,6 +115,7 @@ data class SshCommandRequest(
     val password: String? = null,
     val privateKeyPem: String? = null,
     val command: String,
+    val timeoutMs: Long = 60_000L,
 )
 
 @Serializable
