@@ -25,7 +25,6 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.net.URLEncoder
 
 class HttpGitHubRepository(
@@ -68,6 +67,7 @@ class HttpGitHubRepository(
         mapOf(
             "client_id" to config.clientId,
             "redirect_uri" to config.redirectUri,
+            "scope" to config.scope,
             "state" to session.state,
             "code_challenge" to session.codeChallenge,
             "code_challenge_method" to "S256",
@@ -83,10 +83,10 @@ class HttpGitHubRepository(
         runCatching {
             val code = callbackPrefs.getString("last_code", null).orEmpty()
             val state = callbackPrefs.getString("last_state", null).orEmpty()
-            val error = callbackPrefs.getString("last_error", null).orEmpty()
+            val callbackError = callbackPrefs.getString("last_error", null).orEmpty()
             callbackPrefs.edit().clear().apply()
 
-            require(error.isBlank()) { "GitHub retornou erro: $error" }
+            require(callbackError.isBlank()) { "GitHub retornou erro: $callbackError" }
             require(code.isNotBlank()) { "Nenhum código OAuth foi encontrado" }
             require(state == expectedState) { "State OAuth inválido" }
 
@@ -164,7 +164,9 @@ class HttpGitHubRepository(
         repo: String,
     ): Result<List<PullRequestSummary>> = withContext(Dispatchers.IO) {
         runCatching {
-            getJson("https://api.github.com/repos/$owner/$repo/pulls?state=open&per_page=100", token)
+            val safeOwner = requirePathSegment(owner, "proprietário")
+            val safeRepo = requirePathSegment(repo, "repositório")
+            getJson("https://api.github.com/repos/$safeOwner/$safeRepo/pulls?state=open&per_page=100", token)
                 .let(json::parseToJsonElement)
                 .jsonArray
                 .map { item ->
@@ -189,7 +191,10 @@ class HttpGitHubRepository(
         prNumber: Int,
     ): Result<List<PullRequestReviewSummary>> = withContext(Dispatchers.IO) {
         runCatching {
-            getJson("https://api.github.com/repos/$owner/$repo/pulls/$prNumber/reviews?per_page=100", token)
+            require(prNumber > 0) { "Número do pull request inválido" }
+            val safeOwner = requirePathSegment(owner, "proprietário")
+            val safeRepo = requirePathSegment(repo, "repositório")
+            getJson("https://api.github.com/repos/$safeOwner/$safeRepo/pulls/$prNumber/reviews?per_page=100", token)
                 .let(json::parseToJsonElement)
                 .jsonArray
                 .map { item ->
@@ -212,10 +217,13 @@ class HttpGitHubRepository(
         body: String,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            require(issueNumber > 0) { "Número da issue inválido" }
             require(body.isNotBlank()) { "O comentário não pode estar vazio" }
+            val safeOwner = requirePathSegment(owner, "proprietário")
+            val safeRepo = requirePathSegment(repo, "repositório")
             val payload = buildJsonObject { put("body", body) }.toString()
             postJson(
-                "https://api.github.com/repos/$owner/$repo/issues/$issueNumber/comments",
+                "https://api.github.com/repos/$safeOwner/$safeRepo/issues/$issueNumber/comments",
                 token,
                 payload,
             )
@@ -226,9 +234,9 @@ class HttpGitHubRepository(
     private fun requestToken(body: Map<String, String>): GitHubTokenBundle {
         val raw = postForm("https://github.com/login/oauth/access_token", body)
         val obj = json.parseToJsonElement(raw).jsonObject
-        obj["error"]?.jsonPrimitive?.contentOrNull?.let { error ->
+        obj["error"]?.jsonPrimitive?.contentOrNull?.let { oauthError ->
             val description = obj["error_description"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            error("GitHub OAuth falhou: $error $description")
+            throw IllegalStateException("GitHub OAuth falhou: $oauthError $description")
         }
 
         return GitHubTokenBundle(
@@ -278,8 +286,12 @@ class HttpGitHubRepository(
         method: String,
         configure: (HttpURLConnection) -> Unit,
     ): String {
-        val conn = ((if (url.startsWith("https://api.github.com")) URI(url).toURL() else URL(url))
-            .openConnection() as HttpURLConnection).apply {
+        val uri = URI(url)
+        require(uri.scheme == "https" && uri.host in ALLOWED_GITHUB_HOSTS) {
+            "Destino HTTP não permitido"
+        }
+
+        val conn = (uri.toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
@@ -290,11 +302,17 @@ class HttpGitHubRepository(
             val status = conn.responseCode
             val stream = if (status in 200..299) conn.inputStream else conn.errorStream
             val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-            require(status in 200..299) { "HTTP $status em $method $url: $raw" }
+            require(status in 200..299) { "HTTP $status em $method ${uri.host}: $raw" }
             raw
         } finally {
             conn.disconnect()
         }
+    }
+
+    private fun requirePathSegment(value: String, label: String): String {
+        val normalized = value.trim()
+        require(normalized.matches(GITHUB_PATH_SEGMENT)) { "$label GitHub inválido" }
+        return normalized
     }
 
     private fun encode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
@@ -303,5 +321,7 @@ class HttpGitHubRepository(
         const val CONNECT_TIMEOUT_MS = 15_000
         const val READ_TIMEOUT_MS = 30_000
         const val GITHUB_API_VERSION = "2022-11-28"
+        val ALLOWED_GITHUB_HOSTS = setOf("github.com", "api.github.com")
+        val GITHUB_PATH_SEGMENT = Regex("[A-Za-z0-9_.-]+")
     }
 }
